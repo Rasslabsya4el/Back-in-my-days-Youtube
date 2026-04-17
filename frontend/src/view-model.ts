@@ -22,6 +22,14 @@ export type FormatSelectionModel = {
   qualityChoices: Array<{ label: string; value: string }>;
 };
 
+export type UnifiedStatus = {
+  tone: Tone;
+  label: string;
+  headline: string;
+  detail: string;
+  detailMono: boolean;
+};
+
 export function summarizeQueue(queue: QueueItemSnapshot[]) {
   let queued = 0;
   let running = 0;
@@ -120,9 +128,73 @@ export function resolveQueueFormatOption(item: QueueItemSnapshot) {
 }
 
 export function buildItemSubtitle(item: QueueItemSnapshot) {
-  return [item.probe?.channel || readableSource(item.source_url), formatDuration(item.probe?.duration ?? 0)]
+  return [
+    item.probe?.channel || readableSource(item.source_url),
+    formatDuration(item.probe?.duration ?? 0),
+  ]
     .filter(Boolean)
     .join(" / ");
+}
+
+export function buildQueueProgressNote(item: QueueItemSnapshot) {
+  if (item.status === "completed") {
+    return item.output_path ? `Saved as ${pathLeaf(item.output_path)}.` : "File saved.";
+  }
+
+  if (item.status === "failed" || item.status === "cancelled") {
+    return (
+      sanitizeSecondaryStatus(item.error_message || item.status_detail) ||
+      "Review the error details and retry."
+    );
+  }
+
+  if (item.status === "running") {
+    return (
+      sanitizeSecondaryStatus(item.status_detail) ||
+      describeProcessingStep(item.processing_step) ||
+      "Working on the current download step."
+    );
+  }
+
+  return sanitizeSecondaryStatus(item.status_detail) || "Waiting to start.";
+}
+
+export function buildSelectedStatusDetail(selectedItem: QueueItemSnapshot | null) {
+  if (!selectedItem) {
+    return "";
+  }
+
+  switch (selectedItem.status) {
+    case "running":
+      return (
+        sanitizeSecondaryStatus(selectedItem.status_detail) ||
+        describeProcessingStep(selectedItem.processing_step)
+      );
+    case "completed":
+      return selectedItem.output_path ? compactPath(selectedItem.output_path, 4) : "Saved file ready.";
+    case "failed":
+    case "cancelled":
+      return (
+        sanitizeSecondaryStatus(selectedItem.error_message || selectedItem.status_detail) ||
+        "Review the error details before retrying."
+      );
+    default:
+      return "";
+  }
+}
+
+export function buildPrimaryActionLabel(selectedItem: QueueItemSnapshot | null) {
+  switch (selectedItem?.status) {
+    case "running":
+      return "Downloading...";
+    case "completed":
+      return "Download again";
+    case "failed":
+    case "cancelled":
+      return "Retry download";
+    default:
+      return "Start download";
+  }
 }
 
 export function compactPath(pathValue: string, keepSegments = 3) {
@@ -135,6 +207,7 @@ export function compactPath(pathValue: string, keepSegments = 3) {
   if (parts.length <= keepSegments) {
     return normalized;
   }
+
   return `...\\${parts.slice(-keepSegments).join("\\")}`;
 }
 
@@ -221,7 +294,7 @@ export function buildPrimaryStatusMessage(
   statusMessage: string,
 ) {
   if (bridgeError) {
-    return "The app cannot reach the desktop bridge right now. Open Show debug for technical details.";
+    return "The app cannot reach the desktop bridge right now. Open debug for technical details.";
   }
   if (!selectedItem) {
     return "Paste a YouTube link, confirm where to save it, then add it to the queue.";
@@ -236,9 +309,13 @@ export function buildPrimaryStatusMessage(
         : "The download finished and the file is ready.";
     case "failed":
     case "cancelled":
-      return "This item did not finish. Review the selection and retry, or open Show debug for technical details.";
+      return "This item did not finish. Review the selection and retry, or open debug for technical details.";
     default:
-      return sanitizePrimaryStatus(statusMessage) || "Review the current item, then start the download.";
+      return (
+        sanitizePrimaryStatus(selectedItem.status_detail) ||
+        sanitizePrimaryStatus(statusMessage) ||
+        "Set the format, then start the download."
+      );
   }
 }
 
@@ -273,6 +350,94 @@ export function resolveStatusTone(
   return statusToneFromJob(selectedItem.status);
 }
 
+export function buildUnifiedStatus(
+  item: QueueItemSnapshot | null,
+  bridgeError: string,
+): UnifiedStatus {
+  if (bridgeError) {
+    return {
+      tone: "error",
+      label: "Bridge error",
+      headline: "Desktop bridge unreachable",
+      detail: bridgeError,
+      detailMono: false,
+    };
+  }
+
+  if (!item) {
+    return {
+      tone: "idle",
+      label: "Idle",
+      headline: "No item selected",
+      detail: "Paste a YouTube link above to add the first item.",
+      detailMono: false,
+    };
+  }
+
+  switch (item.status) {
+    case "running": {
+      const stepDetail =
+        sanitizeSecondaryStatus(item.status_detail) ||
+        describeProcessingStep(item.processing_step) ||
+        "Working on the current download step.";
+
+      return {
+        tone: "busy",
+        label: describeQueueStatus(item),
+        headline: stepHeadline(item.processing_step),
+        detail: stepDetail,
+        detailMono: false,
+      };
+    }
+    case "completed":
+      return {
+        tone: "ready",
+        label: "Completed",
+        headline: "Download complete",
+        detail: item.output_path ? compactPath(item.output_path, 4) : "File saved.",
+        detailMono: Boolean(item.output_path),
+      };
+    case "failed":
+    case "cancelled": {
+      const snippet = sanitizeSecondaryStatus(item.error_message || item.status_detail);
+      return {
+        tone: "error",
+        label: item.status === "cancelled" ? "Stopped" : "Failed",
+        headline: item.status === "cancelled" ? "Download stopped" : "Download failed",
+        detail: snippet || "Review the error details and retry.",
+        detailMono: false,
+      };
+    }
+    default: {
+      const detail = sanitizeSecondaryStatus(item.status_detail) || "Waiting to start.";
+      return {
+        tone: "idle",
+        label: "Ready",
+        headline: "Ready to download",
+        detail,
+        detailMono: false,
+      };
+    }
+  }
+}
+
+function stepHeadline(step: QueueItemSnapshot["processing_step"]) {
+  switch (step) {
+    case "preparing":
+      return "Preparing download";
+    case "downloading":
+      return "Downloading";
+    case "postprocessing":
+      return "Finalizing file";
+    case "completed":
+      return "Download complete";
+    case "failed":
+      return "Download failed";
+    default:
+      return "Download in progress";
+  }
+}
+
 export function describeQueueStatus(item: QueueItemSnapshot) {
   switch (item.processing_step) {
     case "preparing":
@@ -286,7 +451,20 @@ export function describeQueueStatus(item: QueueItemSnapshot) {
     case "failed":
       return "Failed";
     default:
-      return item.status === "queued" ? "Ready" : item.status;
+      switch (item.status) {
+        case "queued":
+          return "Ready";
+        case "running":
+          return "Working";
+        case "cancelled":
+          return "Stopped";
+        case "completed":
+          return "Completed";
+        case "failed":
+          return "Failed";
+        default:
+          return item.status;
+      }
   }
 }
 
@@ -383,19 +561,49 @@ function sanitizePrimaryStatus(message: string) {
     return "";
   }
 
-  const lowered = normalized.toLowerCase();
-  if (
+  if (isTechnicalStatusMessage(normalized)) {
+    return "Technical details stay in debug so the main workspace can stay focused on the download flow.";
+  }
+
+  return normalized;
+}
+
+function sanitizeSecondaryStatus(message: string) {
+  const normalized = message.trim();
+  if (!normalized || isTechnicalStatusMessage(normalized)) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function describeProcessingStep(step: QueueItemSnapshot["processing_step"]) {
+  switch (step) {
+    case "preparing":
+      return "Getting formats and output settings ready.";
+    case "downloading":
+      return "Transferring the selected media.";
+    case "postprocessing":
+      return "Merging and finalizing the file.";
+    case "completed":
+      return "File is ready.";
+    case "failed":
+      return "The run stopped before completion.";
+    default:
+      return "";
+  }
+}
+
+function isTechnicalStatusMessage(message: string) {
+  const lowered = message.toLowerCase();
+  return (
     lowered.includes("selected_format_id") ||
     lowered.includes("video-only") ||
     lowered.includes("audio-only") ||
     lowered.includes("muxed") ||
     lowered.includes("resolver status") ||
     lowered.includes("fmt ")
-  ) {
-    return "Technical details stay in Show debug so the main workspace can stay focused on the download flow.";
-  }
-
-  return normalized;
+  );
 }
 
 function pathLeaf(pathValue: string) {

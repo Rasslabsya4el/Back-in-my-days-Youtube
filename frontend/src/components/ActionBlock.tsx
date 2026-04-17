@@ -1,0 +1,108 @@
+import type { DownloadMode, QueueItemSnapshot } from "../types";
+import {
+  buildPrimaryActionLabel,
+  formatFinalFileFormat,
+  formatModeLabel,
+  type FormatSelectionModel,
+  type FriendlyFormatOption,
+} from "../view-model";
+
+export function ActionBlock({
+  selectedItem,
+  currentMode,
+  formatModel,
+  selectedFormatOption,
+  controlsDisabled,
+  onModeChange,
+  onQualityChange,
+  onFileFormatChange,
+  onStart,
+}: {
+  selectedItem: QueueItemSnapshot | null;
+  currentMode: DownloadMode;
+  formatModel: FormatSelectionModel;
+  selectedFormatOption: FriendlyFormatOption | null;
+  controlsDisabled: boolean;
+  onModeChange: (mode: DownloadMode) => void;
+  onQualityChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onFileFormatChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onStart: () => void;
+}) {
+  const finalFileFormatLabel =
+    formatModel.fileFormatChoices[0]?.label ?? formatFinalFileFormat(currentMode);
+  const qualityLabel =
+    selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Pending";
+  const primaryLabel = buildPrimaryActionLabel(selectedItem);
+
+  return (
+    <div className="action-block">
+      <div className="action-row">
+        <span className="action-label">Mode</span>
+        <div aria-label="Download as" className="toggle-group" role="group">
+          {(["video", "audio"] as DownloadMode[]).map((mode) => (
+            <button
+              key={mode}
+              className={`toggle-chip${currentMode === mode ? " active" : ""}`}
+              disabled={controlsDisabled || !selectedItem}
+              onClick={() => onModeChange(mode)}
+              type="button"
+            >
+              {formatModeLabel(mode)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="action-row">
+        <span className="action-label">Quality</span>
+        {formatModel.qualityChoices.length > 1 ? (
+          <select
+            aria-label="Quality"
+            disabled={controlsDisabled || !selectedItem}
+            onChange={onQualityChange}
+            value={selectedFormatOption?.qualityValue ?? ""}
+          >
+            {formatModel.qualityChoices.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="static-value">{qualityLabel}</span>
+        )}
+      </div>
+
+      <div className="action-row">
+        <span className="action-label">File</span>
+        {formatModel.fileFormatChoices.length > 1 ? (
+          <select
+            aria-label="Final file"
+            disabled={controlsDisabled || !selectedItem}
+            onChange={onFileFormatChange}
+            value={selectedFormatOption?.fileFormatValue ?? ""}
+          >
+            {formatModel.fileFormatChoices.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="static-value">{finalFileFormatLabel}</span>
+        )}
+      </div>
+
+      <div className="action-footer">
+        <button
+          className="btn primary lg"
+          disabled={controlsDisabled || !selectedItem}
+          onClick={onStart}
+          type="button"
+        >
+          {primaryLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
