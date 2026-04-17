@@ -427,7 +427,7 @@ def run_smoke_bridge(url: str) -> None:
         )
 
     inspection_payload = bridge.inspect_output()
-    final_selected_item = followup_payload["data"]["state"].get("selected_item") or {}
+    final_selected_item = (followup_payload["data"].get("state") or {}).get("selected_item") or {}
 
     for payload in (
         runtime_payload,

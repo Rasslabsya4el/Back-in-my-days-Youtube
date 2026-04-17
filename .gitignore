@@ -4,6 +4,7 @@ __pycache__/
 runtime/
 output/
 temp/
+node_modules/
 
 .venv/
 venv/

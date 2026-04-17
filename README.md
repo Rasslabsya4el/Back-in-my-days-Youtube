@@ -52,7 +52,7 @@ poetry run python main.py
 ```
 
 By default the bridge host loads the built React UI from `frontend/dist/index.html` when the build exists.
-If the build is missing, the bridge host falls back to a minimal diagnostic HTML page with build instructions.
+If the build is missing, the bridge host falls back to a lightweight HTML page with build instructions plus an optional debug details section.
 
 Run the bridge shell explicitly:
 
@@ -74,7 +74,16 @@ poetry run python main.py --ui-shell tk
 
 If the local `pywebview` backend cannot start, the command exits cleanly with `bridge_host=blocked ...` on stderr and exit code `2` instead of printing a traceback.
 
-After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and stores the selected quality label plus `selected_format_id` in queue state. `Start download` then runs a real pipeline:
+After you paste a YouTube URL into the shell and add it to the queue, the bridge shell exposes the first user-testable path directly on the primary screen:
+- intake URL
+- queue selection
+- mode and quality controls
+- start download
+- status, error, and output path surface
+
+Runtime and inspection diagnostics stay behind an explicit debug toggle that is closed by default.
+
+`Start download` runs a real pipeline:
 - `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
 - `ffmpeg` merges or converts the media into a deterministic final file in `output/`
 - final output contract is `video -> .mp4`, `audio -> .m4a`
@@ -138,7 +147,7 @@ Bridge host startup smoke:
 poetry run python main.py --smoke-bridge-host
 ```
 
-This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. If a React build exists, the smoke uses the built shell; otherwise it uses either the provided `--bridge-start-url` or the fallback diagnostic HTML.
+This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. If a React build exists, the smoke uses the built shell; otherwise it uses either the provided `--bridge-start-url` or the lightweight fallback HTML.
 
 Download smoke using a persisted queue item:
 
@@ -168,7 +177,9 @@ The `pywebview` bridge exposes these Python methods for JS:
 - `get_runtime_info`
 - `inspect_output`
 
-`frontend/src/bridge.ts` wraps these methods in a typed TS client. `get_app_state` is the refresh primitive: the React shell polls it with `since_event_id` and consumes the returned `events` array of full state snapshots. `start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress and status updates into the retained event queue while the background worker is running.
+`frontend/src/bridge.ts` wraps these methods in a typed TS client. `get_app_state` is the refresh primitive: the React shell polls it with `since_event_id`. When the cursor has not advanced, the bridge returns `state_changed=false` with no full-state payload, so the shell can avoid redundant rerenders. The shell also pauses interval polling while the window is hidden and performs a one-shot refresh when focus returns.
+
+`start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress and status updates into the retained event queue while the background worker is running.
 
 The React shell intentionally stays coarse in its progress surface: it renders queue-item statuses and steps, not simulated byte progress that the backend does not expose yet.
 

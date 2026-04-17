@@ -109,8 +109,10 @@ export interface AppStatePayload {
   state: AppState;
 }
 
-export interface GetAppStatePayload extends AppStatePayload {
+export interface GetAppStatePayload {
+  state_changed: boolean;
   events: BridgeEvent[];
+  state?: AppState;
 }
 
 export interface RuntimeBridgeInfo {

@@ -41,14 +41,21 @@ class AppBridgeApi:
         except ValueError as error:
             return self._error_response(code="invalid_request", message=str(error))
         with self._event_lock:
-            current_state = deepcopy(self._latest_state)
             current_cursor = self._event_cursor
-            events = [deepcopy(event) for event in self._events if event["event_id"] > since_event_id]
+            has_updates = since_event_id < current_cursor
             oldest_event_id = self._events[0]["event_id"] if self._events else current_cursor
-
+            if not has_updates:
+                events: list[dict[str, Any]] = []
+                current_state: dict[str, Any] | None = None
+            else:
+                current_state = deepcopy(self._latest_state)
+                events = [
+                    deepcopy(event) for event in self._events if event["event_id"] > since_event_id
+                ]
         return self._response(
             data={
                 "state": current_state,
+                "state_changed": has_updates,
                 "events": events,
             },
             meta={

@@ -17,84 +17,103 @@ DEFAULT_BRIDGE_HTML = """\
     <style>
       :root {
         color-scheme: light;
-        font-family: "Segoe UI", sans-serif;
+        font-family: "Bahnschrift", "Segoe UI", sans-serif;
       }
 
       body {
         margin: 0;
-        padding: 24px;
-        background: linear-gradient(180deg, #f4f1e8 0%, #e5ecf5 100%);
-        color: #1f2937;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        background:
+          radial-gradient(circle at top left, rgba(225, 163, 76, 0.18), transparent 30%),
+          linear-gradient(180deg, #f7f3ea 0%, #eef3f7 100%);
+        color: #1d2731;
+      }
+
+      .shell {
+        width: min(720px, 100%);
+        padding: 28px;
+        border-radius: 24px;
+        border: 1px solid rgba(84, 99, 115, 0.14);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 16px 40px rgba(35, 50, 66, 0.08);
       }
 
       h1 {
-        margin: 0 0 8px;
-        font-size: 28px;
+        margin: 0 0 10px;
+        font-size: 30px;
+        letter-spacing: -0.03em;
       }
 
       p {
-        max-width: 780px;
-        line-height: 1.5;
+        margin: 0;
+        line-height: 1.6;
+        color: #596673;
       }
 
-      .panel {
+      code {
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(11, 102, 131, 0.1);
+        color: #0d4763;
+      }
+
+      details {
         margin-top: 18px;
-        padding: 16px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.84);
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        border-top: 1px solid rgba(84, 99, 115, 0.14);
+        padding-top: 18px;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 700;
       }
 
       pre {
+        margin: 14px 0 0;
         overflow: auto;
         padding: 12px;
-        border-radius: 10px;
-        background: #101826;
-        color: #dbe4f0;
+        border-radius: 14px;
+        background: #12202f;
+        color: #e7eff8;
       }
     </style>
   </head>
   <body>
-    <h1>YT Downloader bridge shell</h1>
-    <p>
-      React frontend assets were not found under <code>frontend/dist</code>. Build them with
-      <code>npm install</code> and <code>npm run build</code>, or point the shell at a running
-      Vite dev server with <code>--bridge-start-url http://localhost:5173</code>.
-    </p>
-    <div class="panel">
-      <strong>Runtime</strong>
-      <pre id="runtime">Loading runtime info...</pre>
-    </div>
-    <div class="panel">
-      <strong>App state</strong>
-      <pre id="state">Loading app state...</pre>
+    <div class="shell">
+      <h1>Frontend build missing</h1>
+      <p>
+        The desktop shell can start, but the built React assets were not found under
+        <code>frontend/dist</code>.
+      </p>
+      <p style="margin-top: 12px">
+        Build the shell with <code>npm install</code> and <code>npm run build</code>, or point
+        the host at a running Vite server with <code>--bridge-start-url http://localhost:5173</code>.
+      </p>
+      <details>
+        <summary>Debug details</summary>
+        <pre id="runtime">Waiting for pywebview runtime info...</pre>
+      </details>
     </div>
     <script>
       const runtimeNode = document.getElementById("runtime");
-      const stateNode = document.getElementById("state");
-      let lastCursor = 0;
 
-      function formatPayload(payload) {
-        return JSON.stringify(payload, null, 2);
-      }
-
-      async function refreshBridgeState() {
+      window.addEventListener("pywebviewready", () => {
         if (!window.pywebview?.api) {
-          stateNode.textContent = "pywebview bridge API is not ready yet.";
+          runtimeNode.textContent = "pywebview bridge API is not ready yet.";
           return;
         }
 
-        const runtime = await window.pywebview.api.get_runtime_info();
-        runtimeNode.textContent = formatPayload(runtime);
-
-        const appState = await window.pywebview.api.get_app_state({ since_event_id: lastCursor });
-        lastCursor = appState.meta?.event_cursor ?? lastCursor;
-        stateNode.textContent = formatPayload(appState);
-      }
-
-      window.addEventListener("pywebviewready", () => {
-        refreshBridgeState();
-        window.setInterval(refreshBridgeState, 1000);
+        window.pywebview.api
+          .get_runtime_info()
+          .then((payload) => {
+            runtimeNode.textContent = JSON.stringify(payload, null, 2);
+          })
+          .catch((error) => {
+            runtimeNode.textContent = String(error);
+          });
       });
     </script>
   </body>
