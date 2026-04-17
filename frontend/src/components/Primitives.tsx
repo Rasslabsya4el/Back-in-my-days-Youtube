@@ -2,6 +2,8 @@ import type { QueueItemSnapshot } from "../types";
 import {
   buildItemSubtitle,
   describeQueueStatus,
+  formatDuration,
+  formatModeLabel,
   resolveStatusTone,
   type Tone,
   type UnifiedStatus,
@@ -149,6 +151,8 @@ export function QueueRowRail({
   disabled: boolean;
 }) {
   const tone: Tone = resolveStatusTone(item, "");
+  const duration = item.probe?.duration ? formatDuration(item.probe.duration) : "";
+  const subtitle = [describeQueueStatus(item), duration].filter(Boolean).join(" / ");
 
   return (
     <button
@@ -161,14 +165,17 @@ export function QueueRowRail({
     >
       <div aria-hidden="true" className="thumb mini">
         {item.probe?.thumbnail ? (
-          <img alt="" className="loaded" src={item.probe.thumbnail} />
+          <img alt="" className="loaded" decoding="async" loading="lazy" src={item.probe.thumbnail} />
         ) : (
           <span className="placeholder">.</span>
         )}
       </div>
       <span className="qr-main">
-        <span className="qr-title">{item.title || item.source_url}</span>
-        <span className="qr-sub">{describeQueueStatus(item)}</span>
+        <span className="qr-title-row">
+          <span className="qr-title">{item.title || item.source_url}</span>
+          <span className="queue-kind">{formatModeLabel(item.mode)}</span>
+        </span>
+        <span className="qr-sub">{subtitle}</span>
       </span>
       <span className={`status-dot tone-${tone}`} />
     </button>

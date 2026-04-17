@@ -12,12 +12,7 @@ import { DebugDrawer } from "./components/DebugDrawer";
 import { VariantA } from "./components/VariantA";
 import { VariantB } from "./components/VariantB";
 import { VariantC } from "./components/VariantC";
-import {
-  VariantSwitcher,
-  type VariantId,
-  useCompareMode,
-  useVariant,
-} from "./components/VariantSwitcher";
+import { useCompareMode } from "./components/VariantSwitcher";
 import type { VariantProps } from "./components/variant-types";
 import type {
   AppState,
@@ -55,7 +50,6 @@ function App() {
   const [debugEventCount, setDebugEventCount] = useState(0);
   const [lastStateSyncAt, setLastStateSyncAt] = useState("");
   const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
-  const [variantId, setVariantId] = useVariant();
   const [compareMode, setCompareMode] = useCompareMode();
 
   const isMountedRef = useRef(true);
@@ -376,8 +370,6 @@ function App() {
     queueSummary: formatQueueSummary(progress),
   };
 
-  const currentVariantLabel = variantId.toUpperCase();
-
   return (
     <div className="app-root">
       <header className="topbar">
@@ -415,7 +407,7 @@ function App() {
         </button>
 
         <button className="btn" onClick={() => setCompareMode(!compareMode)} type="button">
-          {compareMode ? `Single ${currentVariantLabel}` : "Compare A/B/C"}
+          {compareMode ? "Single mode" : "Compare A/B/C"}
         </button>
 
         <span
@@ -438,7 +430,7 @@ function App() {
         {compareMode ? (
           <CompareMode variantProps={variantProps} />
         ) : (
-          <SingleVariant variantId={variantId} variantProps={variantProps} />
+          <VariantC {...variantProps} />
         )}
       </main>
 
@@ -458,27 +450,8 @@ function App() {
         runtimeInfo={runtimeInfo}
         selectedItem={selectedItem}
       />
-
-      {!compareMode ? <VariantSwitcher onChange={setVariantId} value={variantId} /> : null}
     </div>
   );
-}
-
-function SingleVariant({
-  variantId,
-  variantProps,
-}: {
-  variantId: VariantId;
-  variantProps: VariantProps;
-}) {
-  switch (variantId) {
-    case "b":
-      return <VariantB {...variantProps} />;
-    case "c":
-      return <VariantC {...variantProps} />;
-    default:
-      return <VariantA {...variantProps} />;
-  }
 }
 
 function CompareMode({ variantProps }: { variantProps: VariantProps }) {

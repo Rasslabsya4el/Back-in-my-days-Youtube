@@ -33,67 +33,82 @@ export function ActionBlock({
   const qualityLabel =
     selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Pending";
   const primaryLabel = buildPrimaryActionLabel(selectedItem);
+  const selectionSummary = `${formatModeLabel(currentMode)} / ${qualityLabel} / ${finalFileFormatLabel}`;
+  const actionHint = selectedItem
+    ? `Final output saves as ${finalFileFormatLabel}.`
+    : "Select an item to configure the output.";
 
   return (
     <div className="action-block">
-      <div className="action-row">
-        <span className="action-label">Mode</span>
-        <div aria-label="Download as" className="toggle-group" role="group">
-          {(["video", "audio"] as DownloadMode[]).map((mode) => (
-            <button
-              key={mode}
-              className={`toggle-chip${currentMode === mode ? " active" : ""}`}
+      <div className="action-head">
+        <div className="action-head-copy">
+          <span className="action-kicker">Download setup</span>
+          <h4>Choose the saved output</h4>
+        </div>
+        <span className="action-summary">{selectionSummary}</span>
+      </div>
+
+      <div className="action-grid">
+        <div className="action-row">
+          <span className="action-label">Mode</span>
+          <div aria-label="Download as" className="toggle-group" role="group">
+            {(["video", "audio"] as DownloadMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={`toggle-chip${currentMode === mode ? " active" : ""}`}
+                disabled={controlsDisabled || !selectedItem}
+                onClick={() => onModeChange(mode)}
+                type="button"
+              >
+                {formatModeLabel(mode)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="action-row">
+          <span className="action-label">Quality</span>
+          {formatModel.qualityChoices.length > 1 ? (
+            <select
+              aria-label="Quality"
               disabled={controlsDisabled || !selectedItem}
-              onClick={() => onModeChange(mode)}
-              type="button"
+              onChange={onQualityChange}
+              value={selectedFormatOption?.qualityValue ?? ""}
             >
-              {formatModeLabel(mode)}
-            </button>
-          ))}
+              {formatModel.qualityChoices.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="static-value">{qualityLabel}</span>
+          )}
+        </div>
+
+        <div className="action-row">
+          <span className="action-label">File</span>
+          {formatModel.fileFormatChoices.length > 1 ? (
+            <select
+              aria-label="Final file"
+              disabled={controlsDisabled || !selectedItem}
+              onChange={onFileFormatChange}
+              value={selectedFormatOption?.fileFormatValue ?? ""}
+            >
+              {formatModel.fileFormatChoices.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="static-value">{finalFileFormatLabel}</span>
+          )}
         </div>
       </div>
 
-      <div className="action-row">
-        <span className="action-label">Quality</span>
-        {formatModel.qualityChoices.length > 1 ? (
-          <select
-            aria-label="Quality"
-            disabled={controlsDisabled || !selectedItem}
-            onChange={onQualityChange}
-            value={selectedFormatOption?.qualityValue ?? ""}
-          >
-            {formatModel.qualityChoices.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="static-value">{qualityLabel}</span>
-        )}
-      </div>
-
-      <div className="action-row">
-        <span className="action-label">File</span>
-        {formatModel.fileFormatChoices.length > 1 ? (
-          <select
-            aria-label="Final file"
-            disabled={controlsDisabled || !selectedItem}
-            onChange={onFileFormatChange}
-            value={selectedFormatOption?.fileFormatValue ?? ""}
-          >
-            {formatModel.fileFormatChoices.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="static-value">{finalFileFormatLabel}</span>
-        )}
-      </div>
-
       <div className="action-footer">
+        <span className="action-hint">{actionHint}</span>
         <button
           className="btn primary lg"
           disabled={controlsDisabled || !selectedItem}
