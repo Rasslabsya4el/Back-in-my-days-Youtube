@@ -4,7 +4,7 @@
 
 UI/runtime stack v1:
 - Python 3.12
-- Tkinter for desktop shell
+- Tkinter as a temporary diagnostic shell over a UI-agnostic Python controller layer
 - `yt-dlp` for YouTube metadata and formats probing
 - stdlib (`dataclasses`, `enum`, `json`, `pathlib`) for config and queue state
 
@@ -31,6 +31,8 @@ After you paste a YouTube URL into the shell and add it to the queue, the app pr
 - `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
 - `ffmpeg` merges or converts the media into a deterministic final file in `output/`
 - final output contract is `video -> .mp4`, `audio -> .m4a`
+
+The orchestration and state mutations now live in `app/controller/`. `app/shell.py` only binds controller state to Tkinter widgets, so the same Python backend contracts can be reused by the future `React + pywebview` bridge.
 
 For video items, saved muxed formats are remuxed/transcoded into `mp4`. Saved video-only formats automatically pull the best saved companion audio format from the persisted probe state and merge both streams.
 
@@ -85,7 +87,7 @@ The third example forces a saved video-only format so the pipeline has to downlo
 Compile sanity check:
 
 ```powershell
-poetry run python -m py_compile main.py app\models.py app\shell.py app\core\__init__.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
+poetry run python -m py_compile main.py app\shell.py app\controller\__init__.py app\controller\app_controller.py app\controller\contracts.py app\core\__init__.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
 ```
 
 ## ffmpeg / ffprobe resolution order

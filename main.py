@@ -4,15 +4,11 @@ import argparse
 import re
 from pathlib import Path
 
-from app import AppConfig, AppShell, QueueItem, QueueStateStore, create_default_config
-from app.core import (
-    DownloadPipelineError,
-    MediaPostprocessError,
-    QueueItemDownloader,
-    YoutubeProbeError,
-    YoutubeProbeService,
-)
-from app.models import DownloadMode, FormatOption, ProbeResult, QualityOption
+from app.config import AppConfig, create_default_config
+from app.controller import AppController
+from app.core import DownloadPipelineError, MediaPostprocessError, YoutubeProbeError
+from app.models import DownloadMode, FormatOption, ProbeResult, QueueItem
+from app.shell import AppShell
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,10 +65,11 @@ def create_smoke_config(state_file_name: str) -> AppConfig:
 
 
 def run_smoke_state() -> None:
-    config = create_default_config()
-    config.ensure_directories()
-    smoke_state_file = config.runtime_dir / "queue_state.smoke.json"
-    store = QueueStateStore(smoke_state_file)
+    config = create_smoke_config("queue_state.smoke.json")
+    if config.state_file.exists():
+        config.state_file.unlink()
+    controller = AppController(config)
+
     sample_probe = ProbeResult(
         source_url="https://www.youtube.com/watch?v=BaW_jenozKc",
         title="Smoke test item",
@@ -100,29 +97,30 @@ def run_smoke_state() -> None:
     sample_item = QueueItem(
         source_url=sample_probe.source_url,
         mode=DownloadMode.VIDEO,
-        quality=QualityOption.BEST,
+        quality=sample_probe.video_formats[0].quality_label,
         title=sample_probe.title,
         probe=sample_probe,
         selected_format_id="137",
     )
-    store.save([sample_item])
-    loaded = store.load()
+    controller.save_queue_state([sample_item], selected_item_id=sample_item.id)
+    state = controller.load_queue_state()
+    selected = state.selected_item or state.queue[0]
     print(
         " ".join(
             [
-                f"queue_items={len(loaded)}",
-                f"state_file={smoke_state_file}",
-                f"probe_title={loaded[0].probe.title if loaded and loaded[0].probe else 'missing'}",
-                f"video_options={len(loaded[0].probe.video_formats) if loaded and loaded[0].probe else 0}",
-                f"audio_options={len(loaded[0].probe.audio_formats) if loaded and loaded[0].probe else 0}",
+                f"queue_items={len(state.queue)}",
+                f"state_file={config.state_file}",
+                f"probe_title={selected.probe.title if selected.probe else 'missing'}",
+                f"video_options={len(selected.probe.video_formats) if selected.probe else 0}",
+                f"audio_options={len(selected.probe.audio_formats) if selected.probe else 0}",
             ]
         )
     )
 
 
 def run_smoke_start() -> None:
-    config = create_default_config()
-    app = AppShell(config)
+    controller = AppController(create_default_config())
+    app = AppShell(controller)
     app.root.update_idletasks()
     app.root.update()
     app.close()
@@ -130,10 +128,10 @@ def run_smoke_start() -> None:
 
 
 def run_smoke_probe(urls: list[str]) -> None:
-    service = YoutubeProbeService()
+    controller = AppController(create_default_config())
     for url in urls:
         try:
-            probe = service.probe(url)
+            probe = controller.probe_url(url)
             print(
                 " ".join(
                     [
@@ -163,22 +161,9 @@ def run_smoke_intake(url: str) -> None:
     config = create_smoke_config("queue_state.intake.smoke.json")
     if config.state_file.exists():
         config.state_file.unlink()
-    app = AppShell(config)
+    controller = AppController(config)
     try:
-        result = app.smoke_add_url(url)
-        print(
-            " ".join(
-                [
-                    "intake=ok",
-                    f"title={result['title']!r}",
-                    f"selected_quality={result['selected_quality']!r}",
-                    f"selected_format_id={result['selected_format_id']!r}",
-                    f"quality_values={result['quality_values']!r}",
-                    f"video_options={result['video_options']}",
-                    f"audio_options={result['audio_options']}",
-                ]
-            )
-        )
+        state = controller.add_url(url)
     except YoutubeProbeError as error:
         print(
             " ".join(
@@ -189,8 +174,26 @@ def run_smoke_intake(url: str) -> None:
                 ]
             )
         )
-    finally:
-        app.close()
+        return
+
+    item = state.selected_item
+    if item is None:
+        print("intake=error reason='no selected item after intake'")
+        return
+
+    print(
+        " ".join(
+            [
+                "intake=ok",
+                f"title={item.title!r}",
+                f"selected_quality={state.selection.quality!r}",
+                f"selected_format_id={state.selection.selected_format_id!r}",
+                f"quality_values={list(state.selection.quality_options)!r}",
+                f"video_options={len(item.probe.video_formats) if item.probe else 0}",
+                f"audio_options={len(item.probe.audio_formats) if item.probe else 0}",
+            ]
+        )
+    )
 
 
 def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> None:
@@ -200,10 +203,9 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
     if config.state_file.exists():
         config.state_file.unlink()
 
-    service = YoutubeProbeService()
-    store = QueueStateStore(config.state_file)
+    controller = AppController(config)
     try:
-        probe = service.probe(url)
+        probe = controller.probe_url(url)
     except YoutubeProbeError as error:
         print(
             " ".join(
@@ -216,32 +218,32 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
             )
         )
         return
+
     try:
         item = _build_smoke_download_item(probe=probe, mode=mode, format_id=format_id)
     except ValueError as error:
         print(f"download=error reason={error!s}")
         return
-    store.save([item])
-    loaded = store.load()
-    if not loaded:
+
+    controller.save_queue_state([item], selected_item_id=item.id)
+    state = controller.load_queue_state()
+    if not state.queue:
         print("download=error reason='failed to reload persisted queue item'")
         return
 
-    loaded_item = loaded[0]
-    downloader = QueueItemDownloader(config)
-
     try:
-        output_path = downloader.execute(loaded_item)
+        state = controller.start_download(item.id)
     except DownloadPipelineError:
-        store.save([loaded_item])
+        state = controller.get_state()
+        loaded_item = state.selected_item or state.queue[0]
         print(
             " ".join(
                 [
                     "download=error",
                     f"mode={mode.value}",
                     f"selected_format_id={loaded_item.selected_format_id!r}",
-                    f"status={loaded_item.status.value}",
-                    f"step={loaded_item.processing_step.value}",
+                    f"status={loaded_item.status}",
+                    f"step={loaded_item.processing_step}",
                     f"detail={loaded_item.status_detail!r}",
                     f"output_path={loaded_item.output_path!r}",
                     f"error={loaded_item.error_message!r}",
@@ -250,9 +252,10 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
         )
         return
 
-    store.save([loaded_item])
+    loaded_item = state.selected_item or state.queue[0]
+    output_path = Path(loaded_item.output_path)
     try:
-        inspection = downloader.inspect_output(Path(output_path))
+        inspection = controller.inspect_output(output_path)
     except MediaPostprocessError as error:
         inspection = None
         format_name = f"ffprobe-error:{error}"
@@ -260,18 +263,19 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
     else:
         format_name = inspection["format_name"] if inspection else "unavailable"
         stream_types = inspection["stream_types"] if inspection else []
+
     print(
         " ".join(
             [
                 "download=ok",
                 f"mode={mode.value}",
                 f"selected_format_id={loaded_item.selected_format_id!r}",
-                f"status={loaded_item.status.value}",
-                f"step={loaded_item.processing_step.value}",
+                f"status={loaded_item.status}",
+                f"step={loaded_item.processing_step}",
                 f"detail={loaded_item.status_detail!r}",
                 f"output_path={loaded_item.output_path!r}",
-                f"suffix={Path(output_path).suffix!r}",
-                f"size={Path(output_path).stat().st_size}",
+                f"suffix={output_path.suffix!r}",
+                f"size={output_path.stat().st_size}",
                 f"format_name={format_name!r}",
                 f"stream_types={stream_types!r}",
                 f"error={loaded_item.error_message!r}",
@@ -365,8 +369,8 @@ def main() -> None:
         )
         return
 
-    config = create_default_config()
-    AppShell(config).run()
+    controller = AppController(create_default_config())
+    AppShell(controller).run()
 
 
 if __name__ == "__main__":
