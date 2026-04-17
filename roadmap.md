@@ -87,7 +87,7 @@ YT Downloader - локальное десктопное приложение д�
 | `TZ-EH-AUDIO-01` | `EH` | После валидации добрать совместимость и cleanup для staged-output/artwork temp files, если найдутся ошибки на реальном ffmpeg | `not_needed` |
 | `TZ-OBS-ERROR-01` | `OBS` | Проверить, что блокеры внешних инструментов и сбои postprocess читаемо доходят до UI и smoke-режимов | `accepted` |
 | `TZ-REL-RUNTIME-01` | `REL` | Зафиксировать контракт поставки `frontend/dist` и bundled media tools для локального запуска и упаковки | `accepted` |
-| `TZ-PIPE-QUEUE-01` | `PIPE` | Подтвердить, что persisted queue/state корректно переживает повторный запуск после смены режима, качества и формата | `queued` |
+| `TZ-PIPE-QUEUE-01` | `PIPE` | Подтвердить, что persisted queue/state корректно переживает повторный запуск после смены режима, качества и формата | `accepted` |
 
 ## Стратегия валидации
 
@@ -111,5 +111,6 @@ YT Downloader - локальное десктопное приложение д�
 - активная волна `audio metadata/artwork` принята по `TZ-CORE-AUDIO-01` и `TZ-ER-AUDIO-01`;
 - error-surface волна по `TZ-OBS-ERROR-01` принята: наружные контракты для `ffmpeg`, `ffprobe`, `pywebview` и smoke-режимов нормализованы;
 - runtime-contract волна по `TZ-REL-RUNTIME-01` принята: README и фактический порядок bridge-launch/tool-resolution выровнены;
+- persistence-contract волна по `TZ-PIPE-QUEUE-01` принята: `selected_item_id`, `mode`, `quality` и `selected_format_id` устойчиво переживают restart для active item;
 - отчёт с идентификатором `ТЗ-DOS-AUDIO-01` учтён как acceptance-пакет по действующей кластерной схеме `CORE/ER`;
-- текущая волна закрыта, дальнейший follow-up по аудио оставлять только при новых cross-player дефектах.
+- текущая стартовая волна закрыта; дальнейшие follow-up задачи ставить только по новым дефектам или новой продуктовой инициативе.

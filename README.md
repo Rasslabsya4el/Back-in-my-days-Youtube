@@ -103,6 +103,8 @@ Application start creates:
 - `temp/`
 - `app/bin/` as the bundled tools lookup root
 
+The persisted queue state stores both the `queue` payload and top-level `selected_item_id`. Each saved queue item keeps its own `mode`, `quality`, `selected_format_id`, and persisted probe snapshot so the same selection can be restored after restart.
+
 ## Smoke checks
 
 Tk startup smoke:
@@ -116,6 +118,8 @@ Queue state save/load smoke:
 ```powershell
 poetry run python main.py --smoke-state
 ```
+
+This smoke now proves a full restart contract for a temporary state file: selected queue item, `mode`, `quality`, and `selected_format_id` are saved, reloaded, and kept aligned between the active selection snapshot and the persisted queue item.
 
 Probe smoke without download:
 

@@ -65,26 +65,19 @@ class AppController:
         return self.downloader.inspect_output(media_path)
 
     def load_queue_state(self) -> AppState:
-        self._items = self.store.load()
-        if self._selected_item_id and self._find_item(self._selected_item_id):
-            selected_item = self._find_item(self._selected_item_id)
-        else:
-            selected_item = self._items[0] if self._items else None
-            self._selected_item_id = selected_item.id if selected_item else None
+        persisted_state = self.store.load()
+        self._items = persisted_state.items
+        self._selected_item_id = persisted_state.selected_item_id
+        selected_item, did_normalize = self._restore_selected_item_state()
 
         if selected_item is not None:
-            self._current_mode = selected_item.mode
-            selection = self._compute_selection(
-                item=selected_item,
-                mode=self._current_mode,
-                preferred_quality=selected_item.quality,
-            )
-            self._current_quality = selection.selected_quality
             self._status_message = "Queue restored. Select an item or start the download."
         else:
             self._current_quality = ""
             self._status_message = DEFAULT_STATUS_MESSAGE
 
+        if did_normalize or persisted_state.selected_item_id != self._selected_item_id:
+            self.store.save(self._items, selected_item_id=self._selected_item_id)
         return self._emit_state()
 
     def save_queue_state(
@@ -97,24 +90,8 @@ class AppController:
             self._items = list(items)
         if selected_item_id is not None:
             self._selected_item_id = selected_item_id
-        elif self._selected_item_id and self._find_item(self._selected_item_id) is None:
-            self._selected_item_id = self._items[0].id if self._items else None
-        elif self._selected_item_id is None and self._items:
-            self._selected_item_id = self._items[0].id
-
-        selected_item = self._selected_item()
-        if selected_item is not None:
-            self._current_mode = selected_item.mode
-            selection = self._compute_selection(
-                item=selected_item,
-                mode=self._current_mode,
-                preferred_quality=selected_item.quality,
-            )
-            self._current_quality = selection.selected_quality
-        else:
-            self._current_quality = ""
-
-        self.store.save(self._items)
+        self._restore_selected_item_state()
+        self.store.save(self._items, selected_item_id=self._selected_item_id)
         return self._emit_state()
 
     def add_url(self, url: str) -> AppState:
@@ -147,6 +124,7 @@ class AppController:
         return self.save_queue_state(selected_item_id=item.id)
 
     def select_item(self, item_id: str | None) -> AppState:
+        previous_selected_item_id = self._selected_item_id
         item = self._find_item(item_id) if item_id else None
         self._selected_item_id = item.id if item else None
         if item is not None:
@@ -155,12 +133,22 @@ class AppController:
                 item=item,
                 mode=item.mode,
                 preferred_quality=item.quality,
+                preferred_format_id=item.selected_format_id,
             )
             self._current_quality = selection.selected_quality
+            did_change = self._apply_selection_to_item(
+                item=item,
+                mode=self._current_mode,
+                selection=selection,
+            )
             self._status_message = f"Selected {item.title or item.source_url}."
+            if did_change or previous_selected_item_id != self._selected_item_id:
+                return self.save_queue_state(selected_item_id=item.id)
         else:
             self._current_quality = ""
             self._status_message = DEFAULT_STATUS_MESSAGE
+            if previous_selected_item_id is not None:
+                return self.save_queue_state(selected_item_id=None)
         return self._emit_state()
 
     def select_mode(self, mode: DownloadMode | str) -> AppState:
@@ -173,6 +161,7 @@ class AppController:
             item=item,
             mode=self._current_mode,
             preferred_quality=item.quality,
+            preferred_format_id=item.selected_format_id,
         )
         self._current_quality = selection.selected_quality
         if not selection.quality_options or selection.selected_option is None:
@@ -203,6 +192,7 @@ class AppController:
             item=item,
             mode=self._current_mode,
             preferred_quality=quality,
+            preferred_format_id="",
         )
         self._current_quality = selection.selected_quality
         if not selection.quality_options or selection.selected_option is None:
@@ -263,6 +253,7 @@ class AppController:
             item=selected_item,
             mode=self._current_mode,
             preferred_quality=self._current_quality,
+            preferred_format_id=selected_item.selected_format_id if selected_item else "",
         )
         return AppState(
             status_message=self._status_message,
@@ -297,6 +288,7 @@ class AppController:
         item: QueueItem | None,
         mode: DownloadMode,
         preferred_quality: str,
+        preferred_format_id: str,
     ) -> _SelectionComputation:
         if item is None or item.probe is None:
             return _SelectionComputation(
@@ -316,19 +308,84 @@ class AppController:
             )
 
         quality_options = tuple(option.quality_label for option in options)
-        selected_quality = preferred_quality
-        if selected_quality not in quality_options:
-            selected_quality = item.quality if item.quality in quality_options else quality_options[0]
+        selected_option = self._find_option_by_format_id(options, preferred_format_id)
+        if selected_option is None:
+            selected_option = next(
+                (option for option in options if option.quality_label == preferred_quality),
+                None,
+            )
+        if selected_option is None:
+            selected_option = self._find_option_by_format_id(options, item.selected_format_id)
+        if selected_option is None:
+            fallback_quality = item.quality if item.quality in quality_options else quality_options[0]
+            selected_option = next(
+                option for option in options if option.quality_label == fallback_quality
+            )
 
-        selected_option = next(
-            option for option in options if option.quality_label == selected_quality
-        )
         return _SelectionComputation(
-            selected_quality=selected_quality,
+            selected_quality=selected_option.quality_label,
             selected_format_id=selected_option.format_id,
             quality_options=quality_options,
             selected_option=selected_option,
         )
+
+    def _restore_selected_item_state(self) -> tuple[QueueItem | None, bool]:
+        selected_item = self._selected_item()
+        if selected_item is None and self._items:
+            selected_item = self._items[0]
+            self._selected_item_id = selected_item.id
+        elif selected_item is None:
+            self._selected_item_id = None
+            self._current_quality = ""
+            return None, False
+
+        self._current_mode = selected_item.mode
+        selection = self._compute_selection(
+            item=selected_item,
+            mode=self._current_mode,
+            preferred_quality=selected_item.quality,
+            preferred_format_id=selected_item.selected_format_id,
+        )
+        self._current_quality = selection.selected_quality
+        did_change = self._apply_selection_to_item(
+            item=selected_item,
+            mode=self._current_mode,
+            selection=selection,
+        )
+        return selected_item, did_change
+
+    @staticmethod
+    def _apply_selection_to_item(
+        *,
+        item: QueueItem,
+        mode: DownloadMode,
+        selection: _SelectionComputation,
+    ) -> bool:
+        if selection.selected_option is None:
+            return False
+
+        did_change = (
+            item.mode != mode
+            or item.quality != selection.selected_quality
+            or item.selected_format_id != selection.selected_format_id
+        )
+        if not did_change:
+            return False
+
+        item.mode = mode
+        item.quality = selection.selected_quality
+        item.selected_format_id = selection.selected_format_id
+        item.touch()
+        return True
+
+    @staticmethod
+    def _find_option_by_format_id(
+        options: Sequence[FormatOption],
+        format_id: str,
+    ) -> FormatOption | None:
+        if not format_id:
+            return None
+        return next((option for option in options if option.format_id == format_id), None)
 
     def _selected_item(self) -> QueueItem | None:
         return self._find_item(self._selected_item_id)

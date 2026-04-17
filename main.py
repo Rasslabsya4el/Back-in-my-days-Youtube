@@ -118,6 +118,12 @@ def run_smoke_state() -> None:
                 quality_label="1080p | mp4 | video-only | fmt 137",
                 ext="mp4",
                 note="video-only",
+            ),
+            FormatOption(
+                format_id="136",
+                quality_label="720p | mp4 | video-only | fmt 136",
+                ext="mp4",
+                note="video-only",
             )
         ],
         audio_formats=[
@@ -125,6 +131,12 @@ def run_smoke_state() -> None:
                 format_id="140",
                 quality_label="128 kbps | m4a | audio-only | fmt 140",
                 ext="m4a",
+                note="audio-only",
+            ),
+            FormatOption(
+                format_id="251",
+                quality_label="160 kbps | webm | audio-only | fmt 251",
+                ext="webm",
                 note="audio-only",
             )
         ],
@@ -138,14 +150,36 @@ def run_smoke_state() -> None:
         probe=sample_probe,
         selected_format_id="137",
     )
-    controller.save_queue_state([sample_item], selected_item_id=sample_item.id)
-    state = controller.load_queue_state()
-    selected = state.selected_item or state.queue[0]
+    secondary_item = QueueItem(
+        source_url=f"{sample_probe.source_url}&list=smoke",
+        mode=DownloadMode.VIDEO,
+        quality=sample_probe.video_formats[1].quality_label,
+        title="Smoke test item 2",
+        probe=sample_probe,
+        selected_format_id="136",
+    )
+    controller.save_queue_state([sample_item, secondary_item], selected_item_id=secondary_item.id)
+    controller.select_item(secondary_item.id)
+    controller.select_mode(DownloadMode.AUDIO)
+    controller.select_quality(sample_probe.audio_formats[1].quality_label)
+
+    persisted_payload = json.loads(config.state_file.read_text(encoding="utf-8"))
+    reloaded_state = AppController(config).get_state()
+    selected = reloaded_state.selected_item or reloaded_state.queue[0]
     print(
         " ".join(
             [
-                f"queue_items={len(state.queue)}",
+                f"queue_items={len(reloaded_state.queue)}",
                 f"state_file={config.state_file}",
+                f"persisted_selected_item_id={persisted_payload.get('selected_item_id', '')!r}",
+                f"selected_item_id={reloaded_state.selected_item_id!r}",
+                f"selected_item_title={selected.title!r}",
+                f"mode={reloaded_state.selection.mode!r}",
+                f"selected_quality={reloaded_state.selection.quality!r}",
+                f"selected_format_id={reloaded_state.selection.selected_format_id!r}",
+                f"queue_selected_mode={selected.mode!r}",
+                f"queue_selected_quality={selected.quality!r}",
+                f"queue_selected_format_id={selected.selected_format_id!r}",
                 f"probe_title={selected.probe.title if selected.probe else 'missing'}",
                 f"video_options={len(selected.probe.video_formats) if selected.probe else 0}",
                 f"audio_options={len(selected.probe.audio_formats) if selected.probe else 0}",
