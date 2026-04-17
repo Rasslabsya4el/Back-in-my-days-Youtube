@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..ffmpeg import BinaryResolution
+from .audio_metadata import AudioMetadata, download_artwork
 
 
 class MediaPostprocessError(Exception):
@@ -77,41 +78,39 @@ class MediaPostProcessor:
         *,
         audio_input: Path,
         output_path: Path,
+        metadata: AudioMetadata,
+        working_dir: Path,
     ) -> Path:
         self._ensure_ffmpeg("ffmpeg is required to produce the final m4a output.")
         self._remove_if_exists(output_path)
-
+        staged_output = output_path.parent / f"{output_path.stem}.staged{output_path.suffix}"
+        artwork_input = download_artwork(metadata.artwork_url, working_dir=working_dir)
+        self._remove_if_exists(staged_output)
         try:
-            self._run_ffmpeg(
-                description="remux audio to m4a",
-                arguments=[
-                    "-i",
-                    str(audio_input),
-                    "-vn",
-                    "-map",
-                    "0:a:0",
-                    "-c",
-                    "copy",
-                    str(output_path),
-                ],
+            self._finalize_audio_variant(
+                audio_input=audio_input,
+                output_path=staged_output,
+                metadata=metadata,
+                artwork_input=artwork_input,
+                copy_audio=True,
             )
         except MediaPostprocessError:
-            self._remove_if_exists(output_path)
-            self._run_ffmpeg(
-                description="transcode audio to m4a",
-                arguments=[
-                    "-i",
-                    str(audio_input),
-                    "-vn",
-                    "-map",
-                    "0:a:0",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    str(output_path),
-                ],
+            self._remove_if_exists(staged_output)
+            self._finalize_audio_variant(
+                audio_input=audio_input,
+                output_path=staged_output,
+                metadata=metadata,
+                artwork_input=artwork_input,
+                copy_audio=False,
             )
+
+        try:
+            self._validate_output(staged_output, "m4a")
+            staged_output.replace(output_path)
+        finally:
+            self._remove_if_exists(staged_output)
+            if artwork_input is not None:
+                self._remove_if_exists(artwork_input)
 
         self._validate_output(output_path, "m4a")
         return output_path
@@ -126,8 +125,8 @@ class MediaPostProcessor:
             "error",
             "-print_format",
             "json",
-            "-show_entries",
-            "format=format_name,duration,size:stream=index,codec_type,codec_name",
+            "-show_streams",
+            "-show_format",
             str(media_path),
         ]
         result = subprocess.run(
@@ -137,15 +136,17 @@ class MediaPostProcessor:
             text=True,
         )
         if result.returncode != 0:
-            raise MediaPostprocessError(
-                f"ffprobe failed for {media_path.name}: {self._format_process_error(result)}"
-            )
+            raise MediaPostprocessError(self._inspection_failed_message())
 
-        payload = json.loads(result.stdout or "{}")
-        format_info = payload.get("format", {})
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as error:
+            raise MediaPostprocessError(self._inspection_failed_message()) from error
         streams = payload.get("streams", [])
+        format_info = payload.get("format", {})
         stream_types: list[str] = []
         codec_names: list[str] = []
+        attached_pic_streams: list[dict[str, Any]] = []
 
         if isinstance(streams, list):
             for stream in streams:
@@ -153,13 +154,31 @@ class MediaPostProcessor:
                     continue
                 codec_type = stream.get("codec_type")
                 codec_name = stream.get("codec_name")
+                disposition = stream.get("disposition")
+                stream_index = stream.get("index")
                 if codec_type:
                     stream_types.append(str(codec_type))
                 if codec_name:
                     codec_names.append(str(codec_name))
+                if isinstance(disposition, dict) and bool(disposition.get("attached_pic")):
+                    attached_pic_streams.append(
+                        {
+                            "index": stream_index,
+                            "codec_type": str(codec_type or ""),
+                            "codec_name": str(codec_name or ""),
+                        }
+                    )
 
         if not isinstance(format_info, dict):
             format_info = {}
+
+        raw_tags = format_info.get("tags", {})
+        format_tags: dict[str, str] = {}
+        if isinstance(raw_tags, dict):
+            for key in ("title", "artist"):
+                value = raw_tags.get(key)
+                if value:
+                    format_tags[key] = str(value)
 
         return {
             "format_name": str(format_info.get("format_name", "")),
@@ -167,11 +186,99 @@ class MediaPostProcessor:
             "size": str(format_info.get("size", "")),
             "stream_types": stream_types,
             "codec_names": codec_names,
+            "format_tags": format_tags,
+            "has_attached_pic": bool(attached_pic_streams),
+            "attached_pic_streams": attached_pic_streams,
         }
+
+    def _finalize_audio_variant(
+        self,
+        *,
+        audio_input: Path,
+        output_path: Path,
+        metadata: AudioMetadata,
+        artwork_input: Path | None,
+        copy_audio: bool,
+    ) -> None:
+        artwork_candidates = [artwork_input]
+        if artwork_input is not None:
+            artwork_candidates.append(None)
+
+        last_error: MediaPostprocessError | None = None
+        for current_artwork in artwork_candidates:
+            self._remove_if_exists(output_path)
+            try:
+                self._run_ffmpeg(
+                    description=self._describe_audio_variant(
+                        copy_audio=copy_audio,
+                        has_artwork=current_artwork is not None,
+                    ),
+                    arguments=self._audio_arguments(
+                        audio_input=audio_input,
+                        output_path=output_path,
+                        metadata=metadata,
+                        artwork_input=current_artwork,
+                        copy_audio=copy_audio,
+                    ),
+                )
+                return
+            except MediaPostprocessError as error:
+                last_error = error
+
+        if last_error is None:
+            raise MediaPostprocessError("Audio post-processing finished without running ffmpeg.")
+        raise last_error
+
+    @staticmethod
+    def _audio_arguments(
+        *,
+        audio_input: Path,
+        output_path: Path,
+        metadata: AudioMetadata,
+        artwork_input: Path | None,
+        copy_audio: bool,
+    ) -> list[str]:
+        arguments = ["-i", str(audio_input)]
+        if artwork_input is not None:
+            arguments.extend(["-i", str(artwork_input)])
+
+        arguments.extend(["-map_metadata", "-1", "-map", "0:a:0"])
+        if artwork_input is not None:
+            arguments.extend(["-map", "1:v:0"])
+        else:
+            arguments.append("-vn")
+
+        if copy_audio:
+            arguments.extend(["-c:a", "copy"])
+        else:
+            arguments.extend(["-c:a", "aac", "-b:a", "192k"])
+
+        if artwork_input is not None:
+            arguments.extend(
+                [
+                    "-c:v",
+                    "mjpeg",
+                    "-disposition:v:0",
+                    "attached_pic",
+                    "-metadata:s:v:0",
+                    "title=Album cover",
+                    "-metadata:s:v:0",
+                    "comment=Cover (front)",
+                ]
+            )
+
+        arguments.extend(["-movflags", "+faststart", *metadata.ffmpeg_arguments(), str(output_path)])
+        return arguments
+
+    @staticmethod
+    def _describe_audio_variant(*, copy_audio: bool, has_artwork: bool) -> str:
+        action = "remux" if copy_audio else "transcode"
+        detail = " with artwork" if has_artwork else ""
+        return f"{action} audio to m4a{detail}"
 
     def _run_ffmpeg(self, *, description: str, arguments: list[str]) -> None:
         if self.ffmpeg.path is None:
-            raise MediaPostprocessError("ffmpeg resolver returned no executable path.")
+            raise MediaPostprocessError("ffmpeg is not available.")
 
         command = [str(self.ffmpeg.path), "-y", *arguments]
         result = subprocess.run(
@@ -181,9 +288,8 @@ class MediaPostProcessor:
             text=True,
         )
         if result.returncode != 0:
-            raise MediaPostprocessError(
-                f"ffmpeg failed to {description}: {self._format_process_error(result)}"
-            )
+            del description
+            raise MediaPostprocessError(self._postprocess_failed_message(Path(arguments[-1])))
 
     def _ensure_ffmpeg(self, message: str) -> None:
         if not self.ffmpeg.is_available:
@@ -206,14 +312,16 @@ class MediaPostProcessor:
     def _validate_output(output_path: Path, expected_suffix: str) -> None:
         if not output_path.exists():
             raise MediaPostprocessError(
-                f"Post-processing finished without creating {output_path.name}."
+                MediaPostProcessor._postprocess_failed_message(output_path)
             )
         if output_path.suffix.lower() != f".{expected_suffix}":
             raise MediaPostprocessError(
-                f"Expected .{expected_suffix} output, got {output_path.suffix or 'no extension'}."
+                MediaPostProcessor._postprocess_failed_message(output_path)
             )
         if output_path.stat().st_size <= 0:
-            raise MediaPostprocessError(f"Output file {output_path.name} is empty.")
+            raise MediaPostprocessError(
+                MediaPostProcessor._postprocess_failed_message(output_path)
+            )
 
     @staticmethod
     def _remove_if_exists(path: Path) -> None:
@@ -221,6 +329,15 @@ class MediaPostProcessor:
             path.unlink()
         except FileNotFoundError:
             return
+
+    @staticmethod
+    def _inspection_failed_message() -> str:
+        return "Output inspection failed. ffprobe could not read the saved file."
+
+    @staticmethod
+    def _postprocess_failed_message(output_path: Path) -> str:
+        suffix = output_path.suffix.lower().lstrip(".") or "media"
+        return f"Post-processing failed. ffmpeg could not create the final {suffix} file."
 
     @staticmethod
     def _format_process_error(result: subprocess.CompletedProcess[str]) -> str:

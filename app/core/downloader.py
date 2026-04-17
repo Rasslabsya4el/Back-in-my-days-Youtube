@@ -12,6 +12,7 @@ from yt_dlp.utils import DownloadError
 from ..config import AppConfig
 from ..ffmpeg import BinaryResolution, MediaToolResolver
 from ..models import DownloadMode, FormatOption, JobStatus, JobStep, QueueItem
+from .audio_metadata import AudioMetadata
 from .postprocess import MediaPostProcessor, MediaPostprocessError
 
 
@@ -105,6 +106,7 @@ class QueueItemDownloader:
                 plan=plan,
                 downloaded=downloaded,
                 postprocessor=postprocessor,
+                temp_dir=temp_dir,
             )
 
             item.output_path = str(final_path)
@@ -255,6 +257,7 @@ class QueueItemDownloader:
         plan: DownloadPlan,
         downloaded: DownloadedMedia,
         postprocessor: MediaPostProcessor,
+        temp_dir: Path,
     ) -> Path:
         if item.mode == DownloadMode.AUDIO:
             if downloaded.audio_path is None:
@@ -262,9 +265,20 @@ class QueueItemDownloader:
                     JobStep.POSTPROCESSING,
                     "Audio pipeline finished download without an audio file.",
                 )
+            if item.probe is None:
+                raise DownloadPipelineError(
+                    JobStep.POSTPROCESSING,
+                    "Audio pipeline lost saved probe metadata before post-processing.",
+                )
             return postprocessor.finalize_audio(
                 audio_input=downloaded.audio_path,
                 output_path=plan.output_path,
+                metadata=AudioMetadata(
+                    title=item.probe.title,
+                    artist=item.probe.channel,
+                    artwork_url=item.probe.thumbnail,
+                ),
+                working_dir=temp_dir,
             )
 
         if downloaded.video_path is None:
@@ -383,16 +397,9 @@ class QueueItemDownloader:
         if postprocessor.ffmpeg.is_available:
             return
 
-        target = "mp4" if mode == DownloadMode.VIDEO else "m4a"
         raise DownloadPipelineError(
             JobStep.PREPARING,
-            " ".join(
-                [
-                    f"ffmpeg is required to produce final {target} output.",
-                    f"Resolver status: ffmpeg={self._format_resolution(postprocessor.ffmpeg)}",
-                    f"ffprobe={self._format_resolution(postprocessor.ffprobe)}.",
-                ]
-            ),
+            self._ffmpeg_missing_message(mode),
         )
 
     def _build_postprocessor(self) -> MediaPostProcessor:
@@ -498,3 +505,8 @@ class QueueItemDownloader:
             path.unlink()
         except FileNotFoundError:
             return
+
+    @staticmethod
+    def _ffmpeg_missing_message(mode: DownloadMode) -> str:
+        target = "mp4" if mode == DownloadMode.VIDEO else "m4a"
+        return f"ffmpeg is not available. Install ffmpeg or set FFMPEG_PATH to create {target} files."

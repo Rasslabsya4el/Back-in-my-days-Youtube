@@ -13,6 +13,9 @@ from ..models import DownloadMode
 
 BRIDGE_API_VERSION = "bridge.v1"
 DEFAULT_EVENT_HISTORY = 64
+INSPECTION_OK_STATUS = "ok"
+INSPECTION_UNAVAILABLE_STATUS = "ffprobe_unavailable"
+INSPECTION_UNAVAILABLE_MESSAGE = "Output inspection is unavailable because ffprobe is not available."
 
 
 class AppBridgeApi:
@@ -260,10 +263,22 @@ class AppBridgeApi:
         except MediaPostprocessError as error:
             return self._error_response(code="inspect_failed", message=str(error))
 
+        if inspection is None:
+            return self._response(
+                data={
+                    "output_path": output_path,
+                    "inspection": None,
+                    "inspection_status": INSPECTION_UNAVAILABLE_STATUS,
+                    "message": INSPECTION_UNAVAILABLE_MESSAGE,
+                },
+            )
+
         return self._response(
             data={
                 "output_path": output_path,
                 "inspection": to_json_safe_payload(inspection),
+                "inspection_status": INSPECTION_OK_STATUS,
+                "message": "",
             },
         )
 

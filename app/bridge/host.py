@@ -153,8 +153,12 @@ class PywebviewHost:
 
     def probe_environment(self) -> BridgeHostEnvironment:
         webview = self._load_webview()
+        try:
+            pywebview_version = importlib.metadata.version("pywebview")
+        except importlib.metadata.PackageNotFoundError:
+            pywebview_version = "unknown"
         return BridgeHostEnvironment(
-            pywebview_version=importlib.metadata.version("pywebview"),
+            pywebview_version=pywebview_version,
             module_path=getattr(webview, "__file__", "") or "",
         )
 
@@ -176,23 +180,23 @@ class PywebviewHost:
         debug: bool = False,
         auto_close_after: float | None = None,
     ) -> BridgeHostEnvironment:
-        environment = self.probe_environment()
-        webview = self._load_webview()
-        launch_target = self.resolve_launch_target(start_url=start_url)
-        window_kwargs = {
-            "js_api": self.bridge_api,
-            "width": 1180,
-            "height": 820,
-        }
-        if auto_close_after is not None:
-            window_kwargs.update(
-                {
-                    "width": 720,
-                    "height": 540,
-                }
-            )
-
         try:
+            environment = self.probe_environment()
+            webview = self._load_webview()
+            launch_target = self.resolve_launch_target(start_url=start_url)
+            window_kwargs = {
+                "js_api": self.bridge_api,
+                "width": 1180,
+                "height": 820,
+            }
+            if auto_close_after is not None:
+                window_kwargs.update(
+                    {
+                        "width": 720,
+                        "height": 540,
+                    }
+                )
+
             if launch_target.kind in {"url", "file"}:
                 window = webview.create_window(
                     self.title,
@@ -213,7 +217,9 @@ class PywebviewHost:
         except BridgeHostError:
             raise
         except Exception as error:  # pragma: no cover - real GUI backend failures are environment-specific
-            raise BridgeHostStartupError(f"Failed to start pywebview host: {error}") from error
+            raise BridgeHostStartupError(
+                "pywebview is installed, but the desktop host could not start in this environment."
+            ) from error
         return environment
 
     @staticmethod

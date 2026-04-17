@@ -14,6 +14,14 @@ from app.core import DownloadPipelineError, MediaPostprocessError, YoutubeProbeE
 from app.models import DownloadMode, FormatOption, JobStatus, JobStep, ProbeResult, QueueItem
 
 
+SMOKE_INSPECTION_OK = "ok"
+SMOKE_INSPECTION_UNAVAILABLE = "ffprobe_unavailable"
+SMOKE_INSPECTION_FAILED = "failed"
+SMOKE_INSPECTION_UNAVAILABLE_MESSAGE = (
+    "Output inspection is unavailable because ffprobe is not available."
+)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="YT Downloader app shell")
     parser.add_argument(
@@ -24,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bridge-start-url",
-        help="Optional React dev server URL to load inside the bridge shell bootstrap.",
+        help="Optional bridge host URL override; when set, it takes precedence over frontend/dist for --ui-shell bridge and --smoke-bridge-host.",
     )
     parser.add_argument(
         "--bridge-debug",
@@ -288,11 +296,21 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
         inspection = controller.inspect_output(output_path)
     except MediaPostprocessError as error:
         inspection = None
-        format_name = f"ffprobe-error:{error}"
+        inspection_status = SMOKE_INSPECTION_FAILED
+        inspection_message = str(error)
+        format_name = ""
         stream_types = []
     else:
-        format_name = inspection["format_name"] if inspection else "unavailable"
-        stream_types = inspection["stream_types"] if inspection else []
+        if inspection is None:
+            inspection_status = SMOKE_INSPECTION_UNAVAILABLE
+            inspection_message = SMOKE_INSPECTION_UNAVAILABLE_MESSAGE
+            format_name = ""
+            stream_types = []
+        else:
+            inspection_status = SMOKE_INSPECTION_OK
+            inspection_message = ""
+            format_name = inspection["format_name"]
+            stream_types = inspection["stream_types"]
 
     print(
         " ".join(
@@ -306,6 +324,8 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
                 f"output_path={loaded_item.output_path!r}",
                 f"suffix={output_path.suffix!r}",
                 f"size={output_path.stat().st_size}",
+                f"inspection_status={inspection_status!r}",
+                f"inspection_message={inspection_message!r}",
                 f"format_name={format_name!r}",
                 f"stream_types={stream_types!r}",
                 f"error={loaded_item.error_message!r}",

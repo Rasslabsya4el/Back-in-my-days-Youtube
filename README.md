@@ -51,8 +51,10 @@ Run the desktop shell:
 poetry run python main.py
 ```
 
-By default the bridge host loads the built React UI from `frontend/dist/index.html` when the build exists.
-If the build is missing, the bridge host falls back to a lightweight HTML page with build instructions plus an optional debug details section.
+The bridge host resolves its launch target in this order:
+1. `--bridge-start-url`, when provided for `--ui-shell bridge` or `--smoke-bridge-host`
+2. `frontend/dist/index.html`, when the build exists
+3. a lightweight inline HTML fallback with build instructions plus an optional debug details section
 
 Run the bridge shell explicitly:
 
@@ -93,7 +95,7 @@ The orchestration and state mutations live in `app/controller/`. `app/shell.py` 
 
 For video items, saved muxed formats are remuxed/transcoded into `mp4`. Saved video-only formats automatically pull the best saved companion audio format from the persisted probe state and merge both streams.
 
-For audio-only items, the pipeline creates final `.m4a` output without embedding metadata or artwork.
+For audio-only items, the pipeline creates final `.m4a` output with embedded `title`/`artist` metadata and attempts to attach the YouTube thumbnail as cover art. Missing `channel` or thumbnail data does not fail the pipeline.
 
 Application start creates:
 - `runtime/queue_state.json` on first real queue save
@@ -148,7 +150,7 @@ Bridge host startup smoke:
 poetry run python main.py --smoke-bridge-host
 ```
 
-This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. If a React build exists, the smoke uses the built shell; otherwise it uses either the provided `--bridge-start-url` or the lightweight fallback HTML.
+This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. It uses the same launch-target resolution as the normal bridge shell: `--bridge-start-url` first, then `frontend/dist/index.html`, then the lightweight fallback HTML.
 
 Download smoke using a persisted queue item:
 
@@ -163,7 +165,7 @@ The third example forces a saved video-only format so the pipeline has to downlo
 Compile sanity check:
 
 ```powershell
-poetry run python -m py_compile app\__init__.py main.py app\shell.py app\bridge\__init__.py app\bridge\api.py app\bridge\host.py app\controller\__init__.py app\controller\app_controller.py app\controller\contracts.py app\core\__init__.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
+poetry run python -m py_compile app\__init__.py main.py app\shell.py app\bridge\__init__.py app\bridge\api.py app\bridge\host.py app\controller\__init__.py app\controller\app_controller.py app\controller\contracts.py app\core\__init__.py app\core\audio_metadata.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
 ```
 
 ## Bridge contract notes
@@ -193,7 +195,9 @@ The bridge shell bootstrap intentionally stays minimal. In the locked Poetry env
 
 The application resolves binaries in this order:
 1. `FFMPEG_PATH` / `FFPROBE_PATH`
-2. Bundled files under `app/bin/`, `tools/`, or `vendor/`
+2. Bundled files under `app/bin/`, then `tools/`, then `vendor/`
 3. `PATH`
+
+Within each bundled root the resolver probes `<root>/<tool>`, `<root>/bin/<tool>`, `<root>/ffmpeg/<tool>`, `<root>/ffmpeg/bin/<tool>`, and `<root>/win-x64/<tool>` with the platform executable suffix when needed.
 
 If `ffmpeg` is missing, the download pipeline stops before downloading media and writes a user-facing blocker into `QueueItem.error_message` instead of surfacing a stack trace. `ffprobe` is reused for smoke inspection when available.

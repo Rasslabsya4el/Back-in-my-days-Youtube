@@ -246,7 +246,7 @@ class AppController:
                 output_dir=self._session_output_dir,
             )
         except DownloadPipelineError:
-            self._status_message = "Download failed. Check the status section for details."
+            self._status_message = item.error_message or "Download failed."
             self.save_queue_state(selected_item_id=item.id)
             raise
 
