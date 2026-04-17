@@ -27,7 +27,14 @@ Run the desktop shell:
 poetry run python main.py
 ```
 
-After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and available `video` / `audio` qualities without downloading media. The queue state stores the probe result together with the selected quality label and `format_id`.
+After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and stores the selected quality label plus `selected_format_id` in queue state. `Download Selected` then runs a real pipeline:
+- `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
+- `ffmpeg` merges or converts the media into a deterministic final file in `output/`
+- final output contract is `video -> .mp4`, `audio -> .m4a`
+
+For video items, saved muxed formats are remuxed/transcoded into `mp4`. Saved video-only formats automatically pull the best saved companion audio format from the persisted probe state and merge both streams.
+
+For audio-only items, the pipeline creates final `.m4a` output without embedding metadata or artwork.
 
 Application start creates:
 - `runtime/queue_state.json` on first real queue save
@@ -65,10 +72,20 @@ poetry run python main.py --smoke-intake https://www.youtube.com/watch?v=Lm7-yFZ
 
 The state smokes write to `runtime/queue_state.smoke.json` and `runtime/queue_state.intake.smoke.json`.
 
+Download smoke using a persisted queue item:
+
+```powershell
+poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode video
+poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode audio
+poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode video --smoke-download-format-id 299
+```
+
+The third example forces a saved video-only format so the pipeline has to download separate streams and merge them.
+
 Compile sanity check:
 
 ```powershell
-poetry run python -m py_compile main.py app\models.py app\shell.py app\core\__init__.py app\core\youtube_probe.py
+poetry run python -m py_compile main.py app\models.py app\shell.py app\core\__init__.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
 ```
 
 ## ffmpeg / ffprobe resolution order
@@ -77,3 +94,5 @@ The application resolves binaries in this order:
 1. `FFMPEG_PATH` / `FFPROBE_PATH`
 2. Bundled files under `app/bin/`, `tools/`, or `vendor/`
 3. `PATH`
+
+If `ffmpeg` is missing, the download pipeline stops before downloading media and writes a user-facing blocker into `QueueItem.error_message` instead of surfacing a stack trace. `ffprobe` is reused for smoke inspection when available.

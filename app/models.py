@@ -28,6 +28,15 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class JobStep(StrEnum):
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    DOWNLOADING = "downloading"
+    POSTPROCESSING = "postprocessing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class ProbeErrorCode(StrEnum):
     INVALID = "invalid"
     PRIVATE = "private"
@@ -121,6 +130,8 @@ class QueueItem:
     quality: str
     id: str = field(default_factory=lambda: str(uuid4()))
     status: JobStatus = JobStatus.QUEUED
+    processing_step: JobStep = JobStep.QUEUED
+    status_detail: str = ""
     title: str = ""
     output_path: str = ""
     error_message: str = ""
@@ -140,6 +151,8 @@ class QueueItem:
             "mode": self.mode.value,
             "quality": self.quality,
             "status": self.status.value,
+            "processing_step": self.processing_step.value,
+            "status_detail": self.status_detail,
             "output_path": self.output_path,
             "error_message": self.error_message,
             "probe": self.probe.to_dict() if self.probe else None,
@@ -159,6 +172,8 @@ class QueueItem:
             mode=mode,
             quality=str(raw.get("quality", default_quality_for_mode(mode))),
             status=JobStatus(raw.get("status", JobStatus.QUEUED)),
+            processing_step=JobStep(raw.get("processing_step", JobStep.QUEUED)),
+            status_detail=str(raw.get("status_detail", "")),
             output_path=str(raw.get("output_path", "")),
             error_message=str(raw.get("error_message", "")),
             probe=ProbeResult.from_dict(probe_raw) if probe_raw else None,

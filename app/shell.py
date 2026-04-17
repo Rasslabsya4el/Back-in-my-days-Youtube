@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .config import AppConfig
-from .core import YoutubeProbeError, YoutubeProbeService
+from .core import DownloadPipelineError, QueueItemDownloader, YoutubeProbeError, YoutubeProbeService
 from .ffmpeg import MediaToolResolver
 from .models import DownloadMode, FormatOption, ProbeErrorCode, ProbeResult, QueueItem
 from .state_store import QueueStateStore
@@ -18,6 +18,7 @@ class AppShell:
         self.items = self.store.load()
         self.tool_resolver = MediaToolResolver(config)
         self.probe_service = YoutubeProbeService()
+        self.downloader = QueueItemDownloader(config, self.tool_resolver)
         self.ffmpeg = self.tool_resolver.resolve_ffmpeg()
         self.ffprobe = self.tool_resolver.resolve_ffprobe()
         self.root = tk.Tk()
@@ -58,7 +59,7 @@ class AppShell:
 
         subtitle = ttk.Label(
             frame,
-            text="YouTube intake preloads metadata and media qualities before download starts.",
+            text="YouTube intake preloads metadata and saved media selection before download starts.",
         )
         subtitle.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 16))
 
@@ -125,6 +126,13 @@ class AppShell:
         )
         self.details_label.grid(row=0, column=0, sticky="w")
 
+        self.download_button = ttk.Button(
+            details_frame,
+            text="Download Selected",
+            command=self._handle_download_selected,
+        )
+        self.download_button.grid(row=1, column=0, sticky="w", pady=(12, 0))
+
         queue_header = ttk.Label(frame, text="Queue snapshot", font=("Segoe UI", 12, "bold"))
         queue_header.grid(row=5, column=0, columnspan=2, sticky="w", pady=(24, 8))
 
@@ -177,7 +185,7 @@ class AppShell:
         video_count = len(item.probe.video_formats) if item.probe else 0
         audio_count = len(item.probe.audio_formats) if item.probe else 0
         return (
-            f"{item.status} | {item.mode} | {item.quality or '-'} | "
+            f"{item.status}/{item.processing_step} | {item.mode} | {item.quality or '-'} | "
             f"{title} [video={video_count}, audio={audio_count}]"
         )
 
@@ -270,6 +278,31 @@ class AppShell:
                 f"Selection updated for {item.title}: mode={item.mode.value}, quality={item.quality}"
             )
 
+    def _handle_download_selected(self) -> None:
+        item = self._selected_item()
+        if not item:
+            self.status_var.set("Download skipped: no queue item is selected.")
+            return
+
+        self.status_var.set(f"Running download pipeline for {item.title or item.source_url}.")
+        self.root.update_idletasks()
+        try:
+            output_path = self.downloader.execute(item, on_update=self._handle_pipeline_update)
+        except DownloadPipelineError:
+            self.status_var.set(f"Download failed: {item.error_message or 'unknown pipeline error'}")
+        else:
+            self.status_var.set(f"Download completed: {output_path}")
+        finally:
+            self._save_items(select_id=item.id)
+            self._update_details(item)
+
+    def _handle_pipeline_update(self, item: QueueItem) -> None:
+        self.ffmpeg = self.tool_resolver.resolve_ffmpeg()
+        self.ffprobe = self.tool_resolver.resolve_ffprobe()
+        self._save_items(select_id=item.id)
+        self._update_details(item)
+        self.root.update_idletasks()
+
     def _sync_item_selection(
         self,
         item: QueueItem,
@@ -315,32 +348,35 @@ class AppShell:
         return changed
 
     def _update_details(self, item: QueueItem) -> None:
+        base_lines = [
+            f"Title: {item.title or 'unknown'}",
+            f"URL: {item.source_url}",
+            f"Status: {item.status.value}",
+            f"Step: {item.processing_step.value}",
+            f"Detail: {item.status_detail or 'n/a'}",
+            f"Mode: {item.mode.value}",
+            f"Quality: {item.quality or 'n/a'}",
+            f"Selected format_id: {item.selected_format_id or 'n/a'}",
+            f"Output: {item.output_path or 'n/a'}",
+            f"Error: {item.error_message or 'n/a'}",
+        ]
         if not item.probe:
-            self.details_var.set(
-                "\n".join(
-                    [
-                        f"URL: {item.source_url}",
-                        "Metadata: not loaded",
-                    ]
-                )
-            )
+            self.details_var.set("\n".join([*base_lines, "Metadata: not loaded"]))
             return
 
-        self.details_var.set(self._probe_details(item.probe))
+        self.details_var.set("\n".join([*base_lines, "", *self._probe_details_lines(item.probe)]))
 
     @staticmethod
-    def _probe_details(probe: ProbeResult) -> str:
-        return "\n".join(
-            [
-                f"Title: {probe.title}",
-                f"Channel: {probe.channel or 'unknown'}",
-                f"Duration: {AppShell._format_duration(probe.duration)}",
-                f"Thumbnail: {probe.thumbnail or 'n/a'}",
-                f"Source: {probe.source_url}",
-                f"Video qualities: {len(probe.video_formats)}",
-                f"Audio qualities: {len(probe.audio_formats)}",
-            ]
-        )
+    def _probe_details_lines(probe: ProbeResult) -> list[str]:
+        return [
+            f"Probe title: {probe.title}",
+            f"Channel: {probe.channel or 'unknown'}",
+            f"Duration: {AppShell._format_duration(probe.duration)}",
+            f"Thumbnail: {probe.thumbnail or 'n/a'}",
+            f"Source: {probe.source_url}",
+            f"Video qualities: {len(probe.video_formats)}",
+            f"Audio qualities: {len(probe.audio_formats)}",
+        ]
 
     @staticmethod
     def _format_duration(duration_seconds: int) -> str:
