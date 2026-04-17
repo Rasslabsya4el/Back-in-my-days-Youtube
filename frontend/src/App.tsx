@@ -18,17 +18,20 @@ import type {
   RuntimeInfoPayload,
 } from "./types";
 import {
+  buildPrimaryStatusMessage,
   buildFormatSelectionModel,
   buildItemSubtitle,
   compactPath,
   describeQueueStatus,
+  formatDuration,
   formatConnectionState,
+  formatFinalFileFormat,
   formatModeLabel,
   formatPrimaryStatusHeadline,
   formatToolStatus,
   nextStepGuidance,
   pickFriendlyFormatOption,
-  resolveQueueFormatOption,
+  readableSource,
   resolveStatusTone,
   summarizeQueue,
   type Tone,
@@ -71,7 +74,23 @@ function App() {
   const bridgeBusy = bridgeMeta?.download_active ?? false;
   const controlsDisabled = actionBusy || bridgeBusy || connectionState !== "ready";
   const statusTone = resolveStatusTone(selectedItem, bridgeError);
-  const shellMessage = bridgeError || appState?.status_message || "Add a YouTube link to begin.";
+  const primaryStatusMessage = buildPrimaryStatusMessage(
+    selectedItem,
+    bridgeError,
+    appState?.status_message ?? "",
+  );
+  const currentChannel = selectedItem
+    ? selectedItem.probe?.channel || readableSource(selectedItem.source_url)
+    : "";
+  const currentDuration = selectedItem ? formatDuration(selectedItem.probe?.duration ?? 0) : "";
+  const finalFileFormatLabel =
+    formatModel.fileFormatChoices[0]?.label ?? formatFinalFileFormat(currentMode);
+  const qualityLabel =
+    selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Quality pending";
+  const guidanceValue =
+    bridgeError || selectedItem?.error_message
+      ? "Open Show debug for technical details, then retry this item."
+      : nextStepGuidance(selectedItem);
 
   useEffect(() => {
     setThumbnailLoaded(false);
@@ -353,24 +372,20 @@ function App() {
   return (
     <div className="shell">
       <main className="workspace panel">
-        <section className="workspace-block intake-block">
-          <div className="section-heading">
-            <div>
-              <h2>Add a YouTube link</h2>
-              <p className="section-note">
-                Paste a video link to load the title, thumbnail, and download choices.
-              </p>
+        <section className="workspace-strip">
+          <form className="strip-block strip-form" onSubmit={handleAddUrl}>
+            <div className="strip-field">
+              <label htmlFor="youtube-link">YouTube link</label>
+              <input
+                aria-label="YouTube URL"
+                className="url-input"
+                disabled={controlsDisabled}
+                id="youtube-link"
+                onChange={(event) => setUrlInput(event.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={urlInput}
+              />
             </div>
-          </div>
-          <form className="intake-form" onSubmit={handleAddUrl}>
-            <input
-              aria-label="YouTube URL"
-              className="url-input"
-              disabled={controlsDisabled}
-              onChange={(event) => setUrlInput(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              value={urlInput}
-            />
             <button
               className="primary-button"
               disabled={controlsDisabled || !urlInput.trim()}
@@ -379,31 +394,69 @@ function App() {
               Add to queue
             </button>
           </form>
-        </section>
 
-        <section className="workspace-block folder-block">
-          <div className="folder-copy">
-            <p className="section-label">Output folder</p>
-            <div className="path-chip" title={outputDir || "Waiting for runtime state"}>
-              {outputDir ? compactPath(outputDir) : "Waiting for runtime state"}
+          <section className="strip-block strip-folder">
+            <div className="strip-field">
+              <span className="field-label">Save to</span>
+              <div className="path-chip" title={outputDir || "Waiting for runtime state"}>
+                {outputDir ? compactPath(outputDir, 4) : "Waiting for runtime state"}
+              </div>
             </div>
-          </div>
-          <button
-            className="secondary-button"
-            disabled={controlsDisabled}
-            onClick={() => void handlePickOutputDir()}
-            type="button"
-          >
-            Choose folder
-          </button>
+            <button
+              className="secondary-button"
+              disabled={controlsDisabled}
+              onClick={() => void handlePickOutputDir()}
+              type="button"
+            >
+              Browse
+            </button>
+          </section>
         </section>
 
-        <div className="workspace-body">
+        <div className="workspace-flow">
+          <aside className="workspace-block queue-block">
+            <div className="section-heading">
+              <div>
+                <h2>Queue</h2>
+                <p className="section-note">{formatQueueSummary(progress)}</p>
+              </div>
+            </div>
+            {deferredQueue.length === 0 ? (
+              <div className="empty-state">Queue is empty. Add a link to load your first item.</div>
+            ) : (
+              <ul className="queue-list">
+                {deferredQueue.map((item) => {
+                  const isSelected = item.id === appState?.selected_item_id;
+                  const itemTone = resolveStatusTone(item, "");
+                  return (
+                    <li key={item.id}>
+                      <button
+                        aria-pressed={isSelected}
+                        className={`queue-row${isSelected ? " selected" : ""}`}
+                        disabled={controlsDisabled}
+                        onClick={() => void handleSelectItem(item.id)}
+                        type="button"
+                      >
+                        <div className="queue-row-header">
+                          <strong className="queue-row-title">{item.title || item.source_url}</strong>
+                          <span className={`queue-status-chip tone-${itemTone}`}>
+                            {describeQueueStatus(item)}
+                          </span>
+                        </div>
+                        <span className="queue-row-subtitle">{buildItemSubtitle(item)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
+
           <section className="workspace-block current-block">
             <div className="section-heading">
               <div>
                 <h2>Current item</h2>
-                <p className="section-note">Review the selected queue item before downloading.</p>
+                <p className="section-note">Review the selected queue item, then start the download.</p>
               </div>
             </div>
             {selectedItem ? (
@@ -424,147 +477,119 @@ function App() {
                     )}
                   </div>
                   <div className="selected-copy">
-                    <h3>{selectedItem.title || "Untitled queue item"}</h3>
-                    <p className="selected-meta">{buildItemSubtitle(selectedItem)}</p>
-                    <p className="selected-meta">{describeQueueStatus(selectedItem)}</p>
+                    <div className="selected-heading-row">
+                      <h3>{selectedItem.title || "Untitled queue item"}</h3>
+                      <span className={`queue-status-chip tone-${statusTone}`}>
+                        {describeQueueStatus(selectedItem)}
+                      </span>
+                    </div>
+                    <p className="section-note">
+                      Selected from the queue. Update the download settings on this panel only.
+                    </p>
                   </div>
                 </div>
-                <div className="field">
-                  <label htmlFor="mode-toggle">Download type</label>
-                  <div className="toggle-group" id="mode-toggle">
-                    {(["video", "audio"] as DownloadMode[]).map((mode) => (
-                      <button
-                        key={mode}
-                        className={`toggle-chip${currentMode === mode ? " active" : ""}`}
-                        disabled={controlsDisabled}
-                        onClick={() => void handleModeChange(mode)}
-                        type="button"
-                      >
-                        {formatModeLabel(mode)}
-                      </button>
-                    ))}
+
+                <div className="detail-summary-grid">
+                  <SurfaceValue label="Channel" value={currentChannel || "Channel pending"} />
+                  <SurfaceValue label="Duration" value={currentDuration} />
+                </div>
+
+                <div className="current-controls">
+                  <div className="field">
+                    <span className="field-label">Download as</span>
+                    <div aria-label="Download as" className="toggle-group" role="group">
+                      {(["video", "audio"] as DownloadMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          className={`toggle-chip${currentMode === mode ? " active" : ""}`}
+                          disabled={controlsDisabled}
+                          onClick={() => void handleModeChange(mode)}
+                          type="button"
+                        >
+                          {formatModeLabel(mode)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="field-grid">
+                    {formatModel.qualityChoices.length > 1 ? (
+                      <SelectField
+                        disabled={controlsDisabled || !formatModel.qualityChoices.length}
+                        id="quality-select"
+                        label="Quality"
+                        onChange={(event) => void handleQualityChange(event)}
+                        options={formatModel.qualityChoices}
+                        value={selectedFormatOption?.qualityValue ?? ""}
+                      />
+                    ) : (
+                      <StaticField label="Quality" value={qualityLabel} />
+                    )}
+
+                    {formatModel.fileFormatChoices.length > 1 ? (
+                      <SelectField
+                        disabled={controlsDisabled || !formatModel.fileFormatChoices.length}
+                        id="file-format-select"
+                        label="Final file"
+                        onChange={(event) => void handleFileFormatChange(event)}
+                        options={formatModel.fileFormatChoices}
+                        value={selectedFormatOption?.fileFormatValue ?? ""}
+                      />
+                    ) : (
+                      <StaticField label="Final file" value={finalFileFormatLabel} />
+                    )}
+                  </div>
+
+                  <div className="action-row">
+                    <button
+                      className="primary-button"
+                      disabled={controlsDisabled}
+                      onClick={() => void handleStartDownload()}
+                      type="button"
+                    >
+                      Start download
+                    </button>
                   </div>
                 </div>
-                <div className="field-grid">
-                  <SelectField
-                    disabled={controlsDisabled || !formatModel.qualityChoices.length}
-                    id="quality-select"
-                    label="Quality"
-                    onChange={(event) => void handleQualityChange(event)}
-                    options={formatModel.qualityChoices}
-                    value={selectedFormatOption?.qualityValue ?? ""}
-                  />
-                  <SelectField
-                    disabled={controlsDisabled || !formatModel.fileFormatChoices.length}
-                    id="file-format-select"
-                    label="File format"
-                    onChange={(event) => void handleFileFormatChange(event)}
-                    options={formatModel.fileFormatChoices}
-                    value={selectedFormatOption?.fileFormatValue ?? ""}
-                  />
-                </div>
-                <div className="selection-summary">
-                  <span>{formatModeLabel(currentMode)}</span>
-                  <span>{selectedFormatOption?.qualityLabel ?? "Quality pending"}</span>
-                  <span>{selectedFormatOption?.fileFormatLabel ?? "Format pending"}</span>
-                </div>
-                <div className="action-row">
-                  <button
-                    className="primary-button"
-                    disabled={controlsDisabled}
-                    onClick={() => void handleStartDownload()}
-                    type="button"
-                  >
-                    Start download
-                  </button>
+
+                <div className="current-status-panel">
+                  <div className={`status-banner tone-${statusTone}`}>
+                    <strong>{formatPrimaryStatusHeadline(selectedItem, bridgeError)}</strong>
+                    <p>{primaryStatusMessage}</p>
+                  </div>
+                  <div className="status-grid">
+                    <SurfaceValue label="Status" value={describeQueueStatus(selectedItem)} />
+                    <SurfaceValue
+                      label="Save to"
+                      mono
+                      title={outputDir}
+                      value={outputDir ? compactPath(outputDir, 4) : "Waiting for runtime state"}
+                    />
+                    <SurfaceValue
+                      label="Saved file"
+                      mono
+                      title={selectedItem.output_path ?? ""}
+                      value={
+                        selectedItem.output_path
+                          ? compactPath(selectedItem.output_path, 4)
+                          : "No file saved yet."
+                      }
+                    />
+                    <SurfaceValue
+                      label={bridgeError || selectedItem.error_message ? "Need help?" : "Next step"}
+                      tone={bridgeError || selectedItem.error_message ? "error" : "idle"}
+                      value={guidanceValue}
+                    />
+                  </div>
                 </div>
               </>
             ) : (
-              <div className="empty-state">Add a link or select an item from the queue to continue.</div>
-            )}
-          </section>
-
-          <section className="workspace-block queue-block">
-            <div className="section-heading">
-              <div>
-                <h2>Queue</h2>
-                <p className="section-note">
-                  {progress.total === 0
-                    ? "Your queue is empty."
-                    : `${progress.total} item${progress.total === 1 ? "" : "s"} in this session.`}
-                </p>
+              <div className="empty-state">
+                Paste a link to load the first queue item, then review it here before downloading.
               </div>
-            </div>
-            {deferredQueue.length === 0 ? (
-              <div className="empty-state">Queue is empty. Add a link to load your first item.</div>
-            ) : (
-              <ul className="queue-list">
-                {deferredQueue.map((item) => {
-                  const isSelected = item.id === appState?.selected_item_id;
-                  const itemFormat = resolveQueueFormatOption(item);
-                  return (
-                    <li key={item.id}>
-                      <button
-                        className={`queue-row${isSelected ? " selected" : ""}`}
-                        disabled={controlsDisabled}
-                        onClick={() => void handleSelectItem(item.id)}
-                        type="button"
-                      >
-                        <strong className="queue-row-title">{item.title || item.source_url}</strong>
-                        <span className="queue-row-subtitle">{buildItemSubtitle(item)}</span>
-                        <span className="queue-row-meta">
-                          {[describeQueueStatus(item), itemFormat?.qualityLabel, itemFormat?.fileFormatLabel]
-                            .filter(Boolean)
-                            .join(" • ")}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
             )}
           </section>
         </div>
-
-        <section className="workspace-block status-block">
-          <div className="section-heading">
-            <div>
-              <h2>Status and output</h2>
-              <p className="section-note">Track the current step and where the file will be saved.</p>
-            </div>
-          </div>
-          <div className={`status-banner tone-${statusTone}`}>
-            <strong>{formatPrimaryStatusHeadline(selectedItem, bridgeError)}</strong>
-            <p>{shellMessage}</p>
-          </div>
-          <div className="status-grid">
-            <SurfaceValue
-              label="Current folder"
-              mono
-              title={outputDir}
-              value={outputDir ? compactPath(outputDir, 4) : "Waiting for runtime state"}
-            />
-            <SurfaceValue
-              label="Current item"
-              value={selectedItem ? describeQueueStatus(selectedItem) : "Waiting for your first queue item."}
-            />
-            <SurfaceValue
-              label="Saved file"
-              mono
-              title={selectedItem?.output_path ?? ""}
-              value={
-                selectedItem?.output_path
-                  ? compactPath(selectedItem.output_path, 4)
-                  : "No file has been written yet."
-              }
-            />
-            <SurfaceValue
-              label={bridgeError || selectedItem?.error_message ? "Problem" : "Next step"}
-              tone={bridgeError || selectedItem?.error_message ? "error" : "idle"}
-              value={bridgeError || selectedItem?.error_message || nextStepGuidance(selectedItem)}
-            />
-          </div>
-        </section>
       </main>
 
       <section className="panel debug-shell">
@@ -624,6 +649,9 @@ function App() {
                   <Detail label="Project root" mono value={appState?.runtime.project_root ?? "pending"} />
                   <Detail label="Output dir" mono value={appState?.runtime.output_dir ?? "pending"} />
                   <Detail label="State file" mono value={appState?.runtime.state_file ?? "pending"} />
+                  <Detail label="Last status" value={appState?.status_message ?? "pending"} />
+                  <Detail label="Item detail" value={selectedItem?.status_detail || "pending"} />
+                  <Detail label="Item error" value={selectedItem?.error_message || "none"} />
                   <Detail label="ffmpeg" value={formatToolStatus(appState?.runtime.ffmpeg)} />
                   <Detail label="ffprobe" value={formatToolStatus(appState?.runtime.ffprobe)} />
                   <Detail
@@ -707,6 +735,21 @@ function SelectField({
   );
 }
 
+function StaticField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <div className="static-control">{value}</div>
+    </div>
+  );
+}
+
 function SurfaceValue({
   label,
   mono,
@@ -753,6 +796,36 @@ function formatError(error: unknown) {
     return error.message;
   }
   return "Unknown bridge error.";
+}
+
+function formatQueueSummary(progress: {
+  completed: number;
+  failed: number;
+  queued: number;
+  running: number;
+  total: number;
+}) {
+  if (progress.total === 0) {
+    return "No items yet.";
+  }
+
+  const parts = [];
+  if (progress.running) {
+    parts.push(`${progress.running} downloading`);
+  }
+  if (progress.queued) {
+    parts.push(`${progress.queued} ready`);
+  }
+  if (progress.completed) {
+    parts.push(`${progress.completed} saved`);
+  }
+  if (progress.failed) {
+    parts.push(`${progress.failed} need attention`);
+  }
+
+  return parts.length
+    ? `${progress.total} item${progress.total === 1 ? "" : "s"} in queue. ${parts.join(", ")}.`
+    : `${progress.total} item${progress.total === 1 ? "" : "s"} in queue.`;
 }
 
 export default App;

@@ -73,28 +73,17 @@ export function buildFormatSelectionModel(
     selection?.selected_format_id || selectedItem?.selected_format_id || "",
     selection?.quality || selectedItem?.quality || "",
   );
-  const activeFormatValue = activeOption?.fileFormatValue ?? options[0]?.fileFormatValue ?? "";
   const qualityChoices = dedupeChoices(
-    options
-      .filter((option) => !activeFormatValue || option.fileFormatValue === activeFormatValue)
-      .map((option) => ({
-        label: option.qualityLabel,
-        value: option.qualityValue,
-      })),
+    options.map((option) => ({
+      label: option.qualityLabel,
+      value: option.qualityValue,
+    })),
   );
-  const activeQualityValue = activeOption?.qualityValue ?? qualityChoices[0]?.value ?? "";
-  const fileFormatChoices = dedupeChoices(
-    options
-      .filter((option) => !activeQualityValue || option.qualityValue === activeQualityValue)
-      .map((option) => ({
-        label: option.fileFormatLabel,
-        value: option.fileFormatValue,
-      })),
-  );
+  const finalFileFormat = formatFinalFileFormat(mode);
 
   return {
     activeOption,
-    fileFormatChoices,
+    fileFormatChoices: [{ label: finalFileFormat, value: finalFileFormat.toLowerCase() }],
     options,
     qualityChoices,
   };
@@ -133,7 +122,7 @@ export function resolveQueueFormatOption(item: QueueItemSnapshot) {
 export function buildItemSubtitle(item: QueueItemSnapshot) {
   return [item.probe?.channel || readableSource(item.source_url), formatDuration(item.probe?.duration ?? 0)]
     .filter(Boolean)
-    .join(" • ");
+    .join(" / ");
 }
 
 export function compactPath(pathValue: string, keepSegments = 3) {
@@ -153,14 +142,17 @@ export function formatDuration(durationSeconds: number) {
   if (!durationSeconds) {
     return "unknown duration";
   }
+
   const hours = Math.floor(durationSeconds / 3600);
   const minutes = Math.floor((durationSeconds % 3600) / 60);
   const seconds = durationSeconds % 60;
+
   if (hours) {
     return `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
+
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
@@ -195,6 +187,10 @@ export function formatModeLabel(mode: DownloadMode) {
   return mode === "audio" ? "Audio" : "Video";
 }
 
+export function formatFinalFileFormat(mode: DownloadMode) {
+  return mode === "audio" ? "M4A" : "MP4";
+}
+
 export function formatPrimaryStatusHeadline(
   selectedItem: QueueItemSnapshot | null,
   bridgeError: string,
@@ -216,6 +212,33 @@ export function formatPrimaryStatusHeadline(
       return "Download stopped";
     default:
       return "Ready to download";
+  }
+}
+
+export function buildPrimaryStatusMessage(
+  selectedItem: QueueItemSnapshot | null,
+  bridgeError: string,
+  statusMessage: string,
+) {
+  if (bridgeError) {
+    return "The app cannot reach the desktop bridge right now. Open Show debug for technical details.";
+  }
+  if (!selectedItem) {
+    return "Paste a YouTube link, confirm where to save it, then add it to the queue.";
+  }
+
+  switch (selectedItem.status) {
+    case "running":
+      return "The selected item is downloading. This panel updates automatically while it runs.";
+    case "completed":
+      return selectedItem.output_path
+        ? `Saved as ${pathLeaf(selectedItem.output_path)}.`
+        : "The download finished and the file is ready.";
+    case "failed":
+    case "cancelled":
+      return "This item did not finish. Review the selection and retry, or open Show debug for technical details.";
+    default:
+      return sanitizePrimaryStatus(statusMessage) || "Review the current item, then start the download.";
   }
 }
 
@@ -282,11 +305,11 @@ function toFriendlyFormatOption(
 ): FriendlyFormatOption {
   const [primaryLabel] = option.quality_label.split("|");
   const qualityLabel = normalizePrimaryFormatLabel(primaryLabel, mode);
-  const fileFormatLabel = normalizeFileFormatLabel(option.ext, mode);
+  const fileFormatLabel = normalizeFileFormatLabel(mode);
 
   return {
     fileFormatLabel,
-    fileFormatValue: (option.ext || fileFormatLabel).trim().toLowerCase(),
+    fileFormatValue: fileFormatLabel.toLowerCase(),
     option,
     qualityLabel,
     qualityValue: qualityLabel.toLowerCase(),
@@ -336,12 +359,8 @@ function normalizePrimaryFormatLabel(label: string, mode: DownloadMode) {
   return trimmed;
 }
 
-function normalizeFileFormatLabel(ext: string, mode: DownloadMode) {
-  const cleaned = ext.trim();
-  if (!cleaned) {
-    return mode === "audio" ? "Audio" : "Video";
-  }
-  return cleaned.toUpperCase();
+function normalizeFileFormatLabel(mode: DownloadMode) {
+  return formatFinalFileFormat(mode);
 }
 
 function statusToneFromJob(status: QueueItemSnapshot["status"]): Tone {
@@ -356,4 +375,31 @@ function statusToneFromJob(status: QueueItemSnapshot["status"]): Tone {
     default:
       return "idle";
   }
+}
+
+function sanitizePrimaryStatus(message: string) {
+  const normalized = message.trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const lowered = normalized.toLowerCase();
+  if (
+    lowered.includes("selected_format_id") ||
+    lowered.includes("video-only") ||
+    lowered.includes("audio-only") ||
+    lowered.includes("muxed") ||
+    lowered.includes("resolver status") ||
+    lowered.includes("fmt ")
+  ) {
+    return "Technical details stay in Show debug so the main workspace can stay focused on the download flow.";
+  }
+
+  return normalized;
+}
+
+function pathLeaf(pathValue: string) {
+  const normalized = pathValue.replace(/\//g, "\\");
+  const parts = normalized.split("\\").filter(Boolean);
+  return parts[parts.length - 1] ?? normalized;
 }
