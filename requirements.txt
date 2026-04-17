@@ -1,0 +1,2 @@
+# Runtime stack v1 uses only Python 3.12 stdlib modules.
+# No third-party dependencies are required for the current app shell.
