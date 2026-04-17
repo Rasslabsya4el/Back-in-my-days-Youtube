@@ -1,18 +1,36 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import sys
+import time
 from pathlib import Path
 
+from app.bridge import AppBridgeApi, BridgeHostError, PywebviewHost
 from app.config import AppConfig, create_default_config
 from app.controller import AppController
 from app.core import DownloadPipelineError, MediaPostprocessError, YoutubeProbeError
-from app.models import DownloadMode, FormatOption, ProbeResult, QueueItem
-from app.shell import AppShell
+from app.models import DownloadMode, FormatOption, JobStatus, JobStep, ProbeResult, QueueItem
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="YT Downloader app shell")
+    parser.add_argument(
+        "--ui-shell",
+        choices=("tk", "bridge"),
+        default="tk",
+        help="Launch the legacy Tk shell or the pywebview bridge shell bootstrap.",
+    )
+    parser.add_argument(
+        "--bridge-start-url",
+        help="Optional React dev server URL to load inside the bridge shell bootstrap.",
+    )
+    parser.add_argument(
+        "--bridge-debug",
+        action="store_true",
+        help="Enable pywebview debug mode for the bridge shell.",
+    )
     parser.add_argument(
         "--smoke-start",
         action="store_true",
@@ -48,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--smoke-download-format-id",
         help="Explicit saved format_id for --smoke-download. Video mode also accepts values like 137+140.",
+    )
+    parser.add_argument(
+        "--smoke-bridge",
+        metavar="URL",
+        help="Run a headless JSON-safe bridge smoke without importing Tkinter.",
+    )
+    parser.add_argument(
+        "--smoke-bridge-host",
+        action="store_true",
+        help="Start the pywebview bridge host and auto-close it after a short startup probe.",
     )
     return parser
 
@@ -119,6 +147,8 @@ def run_smoke_state() -> None:
 
 
 def run_smoke_start() -> None:
+    from app.shell import AppShell
+
     controller = AppController(create_default_config())
     app = AppShell(controller)
     app.root.update_idletasks()
@@ -284,6 +314,152 @@ def run_smoke_download(url: str, mode: DownloadMode, format_id: str | None) -> N
     )
 
 
+class _BridgeSmokeDownloader:
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+
+    def execute(self, item: QueueItem, *, on_update: object | None = None) -> Path:
+        output_path = self.output_dir / f"{item.id}.bridge-smoke.mp4"
+        self._update_item(
+            item,
+            status=JobStatus.RUNNING,
+            step=JobStep.PREPARING,
+            detail="bridge smoke preparing",
+            on_update=on_update,
+        )
+        self._update_item(
+            item,
+            status=JobStatus.RUNNING,
+            step=JobStep.DOWNLOADING,
+            detail="bridge smoke downloading",
+            on_update=on_update,
+        )
+        output_path.write_text("bridge smoke artifact", encoding="utf-8")
+        item.output_path = str(output_path)
+        item.error_message = ""
+        self._update_item(
+            item,
+            status=JobStatus.COMPLETED,
+            step=JobStep.COMPLETED,
+            detail="bridge smoke completed",
+            on_update=on_update,
+        )
+        return output_path
+
+    def inspect_output(self, media_path: Path) -> dict[str, object] | None:
+        if not media_path.exists():
+            return None
+        return {
+            "format_name": "bridge-smoke",
+            "stream_types": ["video"],
+            "path": str(media_path),
+        }
+
+    @staticmethod
+    def _update_item(
+        item: QueueItem,
+        *,
+        status: JobStatus,
+        step: JobStep,
+        detail: str,
+        on_update: object | None,
+    ) -> None:
+        item.status = status
+        item.processing_step = step
+        item.status_detail = detail
+        item.touch()
+        if callable(on_update):
+            on_update(item)
+
+
+def run_smoke_bridge(url: str) -> None:
+    config = create_smoke_config("queue_state.bridge.smoke.json")
+    if config.state_file.exists():
+        config.state_file.unlink()
+    for stale_artifact in config.output_dir.glob("*.bridge-smoke.mp4"):
+        stale_artifact.unlink()
+
+    controller = AppController(config, downloader=_BridgeSmokeDownloader(config.output_dir))
+    bridge = AppBridgeApi(controller)
+
+    runtime_payload = bridge.get_runtime_info()
+    state_payload = bridge.get_app_state()
+    intake_payload = bridge.add_url({"url": url})
+    if not intake_payload["ok"]:
+        print(
+            " ".join(
+                [
+                    "bridge_smoke=error",
+                    f"stage=add_url",
+                    f"code={intake_payload['error']['code']!r}",
+                    f"message={intake_payload['error']['message']!r}",
+                ]
+            )
+        )
+        return
+
+    queue = intake_payload["data"]["state"]["queue"]
+    selected_item_id = intake_payload["data"]["state"]["selected_item_id"]
+    select_item_payload = bridge.select_item({"item_id": selected_item_id})
+    audio_payload = bridge.select_mode({"mode": DownloadMode.AUDIO.value})
+    audio_options = audio_payload["data"]["state"]["selection"]["quality_options"]
+    quality_payload = bridge.select_quality({"quality": audio_options[0] if audio_options else ""})
+    download_payload = bridge.start_download({"item_id": selected_item_id})
+    if not download_payload["ok"]:
+        print(
+            " ".join(
+                [
+                    "bridge_smoke=error",
+                    f"stage=start_download",
+                    f"code={download_payload['error']['code']!r}",
+                    f"message={download_payload['error']['message']!r}",
+                ]
+            )
+        )
+        return
+
+    followup_payload = bridge.get_app_state({"since_event_id": state_payload["meta"]["event_cursor"]})
+    deadline = time.monotonic() + 5
+    while followup_payload["meta"]["download_active"] and time.monotonic() < deadline:
+        time.sleep(0.05)
+        followup_payload = bridge.get_app_state(
+            {"since_event_id": followup_payload["meta"]["event_cursor"]}
+        )
+
+    inspection_payload = bridge.inspect_output()
+    final_selected_item = followup_payload["data"]["state"].get("selected_item") or {}
+
+    for payload in (
+        runtime_payload,
+        state_payload,
+        intake_payload,
+        select_item_payload,
+        audio_payload,
+        quality_payload,
+        download_payload,
+        inspection_payload,
+        followup_payload,
+    ):
+        json.dumps(payload, ensure_ascii=False)
+
+    print(
+        " ".join(
+            [
+                "bridge_smoke=ok",
+                f"shell_module_loaded={'app.shell' in sys.modules}",
+                f"tkinter_preloaded={'tkinter' in sys.modules}",
+                f"queue_items={len(queue)}",
+                f"selected_item_id={selected_item_id!r}",
+                f"audio_quality_options={len(audio_options)}",
+                f"download_status={final_selected_item.get('status', '')!r}",
+                f"download_step={final_selected_item.get('processing_step', '')!r}",
+                f"inspection_available={inspection_payload['data']['inspection'] is not None}",
+                f"new_events={len(followup_payload['data']['events'])}",
+            ]
+        )
+    )
+
+
 def _build_smoke_download_item(
     *,
     probe: ProbeResult,
@@ -342,24 +518,57 @@ def _find_option(options: list[FormatOption], format_id: str | None) -> FormatOp
     return None
 
 
-def main() -> None:
+def run_bridge_shell(*, start_url: str | None, debug: bool) -> None:
+    controller = AppController(create_default_config())
+    bridge = AppBridgeApi(controller)
+    PywebviewHost(bridge).run(start_url=start_url, debug=debug)
+
+
+def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
+    controller = AppController(create_default_config())
+    bridge = AppBridgeApi(controller)
+    environment = PywebviewHost(bridge).run(
+        start_url=start_url,
+        debug=False,
+        auto_close_after=1.0,
+    )
+    print(
+        " ".join(
+            [
+                "bridge_host_smoke=ok",
+                f"pywebview_version={environment.pywebview_version!r}",
+                f"module_path={environment.module_path!r}",
+                f"entrypoint={'url' if start_url else 'inline_html'}",
+                "startup_path=entered",
+                "auto_closed=True",
+            ]
+        )
+    )
+
+
+def _bridge_host_blocked(error: BridgeHostError) -> int:
+    print(f"bridge_host=blocked message={error}", file=sys.stderr)
+    return error.exit_code
+
+
+def main() -> int:
     args = build_parser().parse_args()
 
     if args.smoke_state:
         run_smoke_state()
-        return
+        return 0
 
     if args.smoke_start:
         run_smoke_start()
-        return
+        return 0
 
     if args.smoke_probe:
         run_smoke_probe(args.smoke_probe)
-        return
+        return 0
 
     if args.smoke_intake:
         run_smoke_intake(args.smoke_intake)
-        return
+        return 0
 
     if args.smoke_download:
         run_smoke_download(
@@ -367,11 +576,32 @@ def main() -> None:
             mode=DownloadMode(args.smoke_download_mode),
             format_id=args.smoke_download_format_id,
         )
-        return
+        return 0
+
+    if args.smoke_bridge:
+        run_smoke_bridge(args.smoke_bridge)
+        return 0
+
+    if args.smoke_bridge_host:
+        try:
+            run_smoke_bridge_host(start_url=args.bridge_start_url)
+        except BridgeHostError as error:
+            return _bridge_host_blocked(error)
+        return 0
+
+    if args.ui_shell == "bridge":
+        try:
+            run_bridge_shell(start_url=args.bridge_start_url, debug=args.bridge_debug)
+        except BridgeHostError as error:
+            return _bridge_host_blocked(error)
+        return 0
+
+    from app.shell import AppShell
 
     controller = AppController(create_default_config())
     AppShell(controller).run()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

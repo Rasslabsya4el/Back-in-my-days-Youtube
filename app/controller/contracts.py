@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from ..ffmpeg import BinaryResolution
@@ -125,6 +127,9 @@ class RuntimeSnapshot:
     ffmpeg: ToolStatus
     ffprobe: ToolStatus
 
+    def to_dict(self) -> dict[str, Any]:
+        return _to_json_safe_payload(self)
+
 
 @dataclass(slots=True, frozen=True)
 class AppState:
@@ -136,4 +141,28 @@ class AppState:
     runtime: RuntimeSnapshot
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _to_json_safe_payload(self)
+
+
+def _to_json_safe_payload(value: Any) -> Any:
+    if is_dataclass(value):
+        return {
+            field.name: _to_json_safe_payload(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _to_json_safe_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_safe_payload(item) for item in value]
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def to_json_safe_payload(value: Any) -> Any:
+    return _to_json_safe_payload(value)
