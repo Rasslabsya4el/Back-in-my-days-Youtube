@@ -5,6 +5,7 @@
 UI/runtime stack v1:
 - Python 3.12
 - Tkinter for desktop shell
+- `yt-dlp` for YouTube metadata and formats probing
 - stdlib (`dataclasses`, `enum`, `json`, `pathlib`) for config and queue state
 
 ## Local start
@@ -21,6 +22,8 @@ python -m pip install -r requirements.txt
 ```powershell
 python main.py
 ```
+
+After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and available `video` / `audio` qualities without downloading media. The queue state stores the probe result together with the selected quality label and `format_id`.
 
 Application start creates:
 - `runtime/queue_state.json` on first real queue save
@@ -42,7 +45,21 @@ Queue state save/load smoke:
 python main.py --smoke-state
 ```
 
-The smoke writes to `runtime/queue_state.smoke.json`.
+Probe smoke without download:
+
+```powershell
+python main.py --smoke-probe https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
+python main.py --smoke-probe https://example.com/watch?v=123
+python main.py --smoke-probe https://www.youtube.com/watch?v=aaaaaaaaaaa
+```
+
+UI intake smoke with immediate quality dropdown population:
+
+```powershell
+python main.py --smoke-intake https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
+```
+
+The state smokes write to `runtime/queue_state.smoke.json` and `runtime/queue_state.intake.smoke.json`.
 
 ## ffmpeg / ffprobe resolution order
 
