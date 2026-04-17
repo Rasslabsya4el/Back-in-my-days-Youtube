@@ -8,19 +8,23 @@ UI/runtime stack v1:
 - `yt-dlp` for YouTube metadata and formats probing
 - stdlib (`dataclasses`, `enum`, `json`, `pathlib`) for config and queue state
 
-## Local start
+## Poetry bootstrap
 
-1. Ensure Python 3.12+ is installed.
-2. Install runtime requirements:
+1. Ensure Python 3.12.x and Poetry are installed.
+2. Install the locked environment:
 
 ```powershell
-python -m pip install -r requirements.txt
+poetry install
 ```
 
-3. Run the desktop shell:
+Poetry is the source of truth for Python dependencies in this repository. `pyproject.toml` declares them and `poetry.lock` pins the resolved set.
+
+## Local start
+
+Run the desktop shell:
 
 ```powershell
-python main.py
+poetry run python main.py
 ```
 
 After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and available `video` / `audio` qualities without downloading media. The queue state stores the probe result together with the selected quality label and `format_id`.
@@ -36,30 +40,36 @@ Application start creates:
 UI startup smoke:
 
 ```powershell
-python main.py --smoke-start
+poetry run python main.py --smoke-start
 ```
 
 Queue state save/load smoke:
 
 ```powershell
-python main.py --smoke-state
+poetry run python main.py --smoke-state
 ```
 
 Probe smoke without download:
 
 ```powershell
-python main.py --smoke-probe https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
-python main.py --smoke-probe https://example.com/watch?v=123
-python main.py --smoke-probe https://www.youtube.com/watch?v=aaaaaaaaaaa
+poetry run python main.py --smoke-probe https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
+poetry run python main.py --smoke-probe https://example.com/watch?v=123
+poetry run python main.py --smoke-probe https://www.youtube.com/watch?v=aaaaaaaaaaa
 ```
 
 UI intake smoke with immediate quality dropdown population:
 
 ```powershell
-python main.py --smoke-intake https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
+poetry run python main.py --smoke-intake https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
 ```
 
 The state smokes write to `runtime/queue_state.smoke.json` and `runtime/queue_state.intake.smoke.json`.
+
+Compile sanity check:
+
+```powershell
+poetry run python -m py_compile main.py app\models.py app\shell.py app\core\__init__.py app\core\youtube_probe.py
+```
 
 ## ffmpeg / ffprobe resolution order
 
