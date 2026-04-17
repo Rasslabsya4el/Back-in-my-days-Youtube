@@ -11,7 +11,7 @@ from ..models import DownloadMode, FormatOption, ProbeErrorCode, ProbeResult, Qu
 from ..state_store import QueueStateStore
 from .contracts import AppState, QueueItemSnapshot, RuntimeSnapshot, SelectionState, ToolStatus
 
-DEFAULT_STATUS_MESSAGE = "Enter a YouTube URL to preload metadata and quality options."
+DEFAULT_STATUS_MESSAGE = "Add a YouTube link to start your queue."
 
 StateListener = Callable[[AppState], None]
 
@@ -45,6 +45,7 @@ class AppController:
         self._selected_item_id: str | None = None
         self._current_mode = DownloadMode.VIDEO
         self._current_quality = ""
+        self._session_output_dir = config.output_dir
         self._status_message = DEFAULT_STATUS_MESSAGE
         self.load_queue_state()
 
@@ -79,8 +80,10 @@ class AppController:
                 preferred_quality=selected_item.quality,
             )
             self._current_quality = selection.selected_quality
+            self._status_message = "Queue restored. Select an item or start the download."
         else:
             self._current_quality = ""
+            self._status_message = DEFAULT_STATUS_MESSAGE
 
         return self._emit_state()
 
@@ -117,7 +120,7 @@ class AppController:
     def add_url(self, url: str) -> AppState:
         normalized = url.strip()
         if not normalized:
-            self._status_message = "Probe skipped: the URL field is empty."
+            self._status_message = "Add a YouTube link to continue."
             return self._emit_state()
 
         try:
@@ -140,11 +143,7 @@ class AppController:
         self._selected_item_id = item.id
         self._current_mode = item.mode
         self._current_quality = item.quality
-        self._status_message = (
-            "Metadata loaded without download: "
-            f"{item.title} | video qualities={len(probe.video_formats)} "
-            f"| audio qualities={len(probe.audio_formats)}"
-        )
+        self._status_message = f"Ready to download {item.title}."
         return self.save_queue_state(selected_item_id=item.id)
 
     def select_item(self, item_id: str | None) -> AppState:
@@ -158,8 +157,10 @@ class AppController:
                 preferred_quality=item.quality,
             )
             self._current_quality = selection.selected_quality
+            self._status_message = f"Selected {item.title or item.source_url}."
         else:
             self._current_quality = ""
+            self._status_message = DEFAULT_STATUS_MESSAGE
         return self._emit_state()
 
     def select_mode(self, mode: DownloadMode | str) -> AppState:
@@ -175,7 +176,7 @@ class AppController:
         )
         self._current_quality = selection.selected_quality
         if not selection.quality_options or selection.selected_option is None:
-            self._status_message = f"No {self._current_mode.value} qualities are available for {item.title}."
+            self._status_message = f"No {self._current_mode.value} options are available for {item.title}."
             return self._emit_state()
 
         changed = (
@@ -190,10 +191,7 @@ class AppController:
         item.quality = selection.selected_quality
         item.selected_format_id = selection.selected_format_id
         item.touch()
-        self._status_message = (
-            f"Selection updated for {item.title}: "
-            f"mode={item.mode.value}, quality={item.quality}"
-        )
+        self._status_message = f"Download option updated for {item.title}."
         return self.save_queue_state(selected_item_id=item.id)
 
     def select_quality(self, quality: str) -> AppState:
@@ -222,29 +220,37 @@ class AppController:
         item.quality = selection.selected_quality
         item.selected_format_id = selection.selected_format_id
         item.touch()
-        self._status_message = (
-            f"Selection updated for {item.title}: "
-            f"mode={item.mode.value}, quality={item.quality}"
-        )
+        self._status_message = f"Download option updated for {item.title}."
         return self.save_queue_state(selected_item_id=item.id)
+
+    def set_output_dir(self, output_dir: Path | str) -> AppState:
+        resolved_output_dir = Path(output_dir).expanduser().resolve()
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+        self._session_output_dir = resolved_output_dir
+        self._status_message = f"Downloads will be saved to {resolved_output_dir}."
+        return self._emit_state()
 
     def start_download(self, item_id: str | None = None) -> AppState:
         item = self._find_item(item_id) if item_id else self._selected_item()
         if item is None:
-            self._status_message = "Download skipped: no queue item is selected."
+            self._status_message = "Choose an item before starting the download."
             return self._emit_state()
 
         self._selected_item_id = item.id
-        self._status_message = f"Running download pipeline for {item.title or item.source_url}."
+        self._status_message = f"Starting download for {item.title or item.source_url}."
         self._emit_state()
         try:
-            output_path = self.downloader.execute(item, on_update=self._handle_pipeline_update)
+            output_path = self.downloader.execute(
+                item,
+                on_update=self._handle_pipeline_update,
+                output_dir=self._session_output_dir,
+            )
         except DownloadPipelineError:
-            self._status_message = f"Download failed: {item.error_message or 'unknown pipeline error'}"
+            self._status_message = "Download failed. Check the status section for details."
             self.save_queue_state(selected_item_id=item.id)
             raise
 
-        self._status_message = f"Download completed: {output_path}"
+        self._status_message = f"Download finished. Saved to {output_path.name}."
         return self.save_queue_state(selected_item_id=item.id)
 
     def _handle_pipeline_update(self, item: QueueItem) -> None:
@@ -277,7 +283,7 @@ class AppController:
         return RuntimeSnapshot(
             project_root=str(self.config.project_root),
             runtime_dir=str(self.config.runtime_dir),
-            output_dir=str(self.config.output_dir),
+            output_dir=str(self._session_output_dir),
             temp_dir=str(self.config.temp_dir),
             state_file=str(self.config.state_file),
             queue_items_loaded=len(self._items),

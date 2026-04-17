@@ -318,8 +318,16 @@ class _BridgeSmokeDownloader:
     def __init__(self, output_dir: Path) -> None:
         self.output_dir = output_dir
 
-    def execute(self, item: QueueItem, *, on_update: object | None = None) -> Path:
-        output_path = self.output_dir / f"{item.id}.bridge-smoke.mp4"
+    def execute(
+        self,
+        item: QueueItem,
+        *,
+        on_update: object | None = None,
+        output_dir: Path | None = None,
+    ) -> Path:
+        target_dir = output_dir or self.output_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        output_path = target_dir / f"{item.id}.bridge-smoke.mp4"
         self._update_item(
             item,
             status=JobStatus.RUNNING,

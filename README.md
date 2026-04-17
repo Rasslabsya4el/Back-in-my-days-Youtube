@@ -74,10 +74,11 @@ poetry run python main.py --ui-shell tk
 
 If the local `pywebview` backend cannot start, the command exits cleanly with `bridge_host=blocked ...` on stderr and exit code `2` instead of printing a traceback.
 
-After you paste a YouTube URL into the shell and add it to the queue, the bridge shell exposes the first user-testable path directly on the primary screen:
+After you paste a YouTube URL into the shell and add it to the queue, the bridge shell keeps the primary screen focused on the user flow:
 - intake URL
+- output folder picker for the current app session
+- current item with `Quality` and `File format` selectors
 - queue selection
-- mode and quality controls
 - start download
 - status, error, and output path surface
 
@@ -173,11 +174,14 @@ The `pywebview` bridge exposes these Python methods for JS:
 - `select_item`
 - `select_mode`
 - `select_quality`
+- `pick_output_dir`
 - `start_download`
 - `get_runtime_info`
 - `inspect_output`
 
 `frontend/src/bridge.ts` wraps these methods in a typed TS client. `get_app_state` is the refresh primitive: the React shell polls it with `since_event_id`. When the cursor has not advanced, the bridge returns `state_changed=false` with no full-state payload, so the shell can avoid redundant rerenders. The shell also pauses interval polling while the window is hidden and performs a one-shot refresh when focus returns.
+
+The React shell keeps format internals inside the bridge/frontend layer. The user sees separate `Quality` and `File format` dropdowns, while the saved `selected_format_id` contract still drives the Python pipeline under the hood.
 
 `start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress and status updates into the retained event queue while the background worker is running.
 

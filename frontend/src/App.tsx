@@ -15,14 +15,28 @@ import type {
   DownloadMode,
   GetAppStatePayload,
   InspectOutputPayload,
-  QueueItemSnapshot,
   RuntimeInfoPayload,
 } from "./types";
+import {
+  buildFormatSelectionModel,
+  buildItemSubtitle,
+  compactPath,
+  describeQueueStatus,
+  formatConnectionState,
+  formatModeLabel,
+  formatPrimaryStatusHeadline,
+  formatToolStatus,
+  nextStepGuidance,
+  pickFriendlyFormatOption,
+  resolveQueueFormatOption,
+  resolveStatusTone,
+  summarizeQueue,
+  type Tone,
+} from "./view-model";
 
 import "./styles.css";
 
 type ConnectionState = "connecting" | "ready" | "error";
-type Tone = "connecting" | "ready" | "error" | "busy" | "idle";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -49,12 +63,15 @@ function App() {
   const deferredQueue = useDeferredValue(queue);
   const selectedItem = appState?.selected_item ?? null;
   const selection = appState?.selection ?? null;
+  const currentMode = selection?.mode ?? selectedItem?.mode ?? "video";
+  const formatModel = buildFormatSelectionModel(selectedItem, currentMode, selection);
+  const selectedFormatOption = formatModel.activeOption;
+  const outputDir = appState?.runtime.output_dir ?? "";
   const progress = summarizeQueue(queue);
   const bridgeBusy = bridgeMeta?.download_active ?? false;
   const controlsDisabled = actionBusy || bridgeBusy || connectionState !== "ready";
   const statusTone = resolveStatusTone(selectedItem, bridgeError);
-  const shellMessage =
-    bridgeError || appState?.status_message || "Waiting for bridge state from the desktop host.";
+  const shellMessage = bridgeError || appState?.status_message || "Add a YouTube link to begin.";
 
   useEffect(() => {
     setThumbnailLoaded(false);
@@ -222,8 +239,8 @@ function App() {
       return;
     }
     await runStateCommand(bridgeClient.addUrl(normalized), {
-      resetUrl: true,
       resetInspection: true,
+      resetUrl: true,
     });
   }
 
@@ -235,7 +252,27 @@ function App() {
   }
 
   async function handleQualityChange(event: React.ChangeEvent<HTMLSelectElement>) {
-    await runStateCommand(bridgeClient.selectQuality(event.target.value), {
+    const nextOption = pickFriendlyFormatOption(formatModel.options, {
+      fileFormatValue: selectedFormatOption?.fileFormatValue ?? "",
+      qualityValue: event.target.value,
+    });
+    if (!nextOption || nextOption.option.quality_label === selection?.quality) {
+      return;
+    }
+    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label), {
+      resetInspection: true,
+    });
+  }
+
+  async function handleFileFormatChange(event: React.ChangeEvent<HTMLSelectElement>) {
+    const nextOption = pickFriendlyFormatOption(formatModel.options, {
+      fileFormatValue: event.target.value,
+      qualityValue: selectedFormatOption?.qualityValue ?? "",
+    });
+    if (!nextOption || nextOption.option.quality_label === selection?.quality) {
+      return;
+    }
+    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label), {
       resetInspection: true,
     });
   }
@@ -309,133 +346,65 @@ function App() {
     }
   }
 
+  async function handlePickOutputDir() {
+    await runStateCommand(bridgeClient.pickOutputDir());
+  }
+
   return (
     <div className="shell">
-      <header className="topbar panel">
-        <div className="topbar-copy">
-          <p className="eyebrow">Desktop Shell</p>
-          <h1>YouTube Downloader</h1>
-          <p className="hero-copy">
-            Paste a link, choose video or audio, then start the saved selection when you are ready.
-          </p>
-        </div>
-        <dl className="status-cluster">
-          <Metric
-            label="Connection"
-            value={formatConnectionState(connectionState)}
-            tone={connectionState}
-          />
-          <Metric label="Queue" value={`${progress.total} item${progress.total === 1 ? "" : "s"}`} />
-          <Metric
-            label="Activity"
-            value={bridgeBusy ? "Download running" : "Idle"}
-            tone={bridgeBusy ? "busy" : "idle"}
-          />
-          <Metric
-            label="Last Sync"
-            value={lastStateSyncAt || "Pending"}
-            tone={lastStateSyncAt ? "ready" : "connecting"}
-          />
-        </dl>
-      </header>
-
-      <main className="layout">
-        <section className="primary-column">
-          <section className="panel intake-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Intake</p>
-                <h2>Add a YouTube link</h2>
-              </div>
-              <StatusBadge tone={connectionState} value={formatConnectionState(connectionState)} />
-            </div>
-            <form className="stack" onSubmit={handleAddUrl}>
-              <div className="intake-row">
-                <input
-                  aria-label="YouTube URL"
-                  className="url-input"
-                  disabled={controlsDisabled}
-                  onChange={(event) => setUrlInput(event.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  value={urlInput}
-                />
-                <button
-                  className="primary-button"
-                  disabled={controlsDisabled || !urlInput.trim()}
-                  type="submit"
-                >
-                  Add to queue
-                </button>
-              </div>
-              <p className="support-copy">
-                Metadata is loaded first. The real download starts only after you press Start download.
+      <main className="workspace panel">
+        <section className="workspace-block intake-block">
+          <div className="section-heading">
+            <div>
+              <h2>Add a YouTube link</h2>
+              <p className="section-note">
+                Paste a video link to load the title, thumbnail, and download choices.
               </p>
-            </form>
-          </section>
-
-          <section className="panel queue-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Queue</p>
-                <h2>Ready to test</h2>
-              </div>
-              <span className="section-note">
-                {bridgeBusy ? "Queue is locked while a download is active." : "Selectable items"}
-              </span>
             </div>
-            <div className="queue-stats">
-              <StatChip label="Queued" value={String(progress.queued)} />
-              <StatChip label="Running" value={String(progress.running)} tone={progress.running ? "busy" : "idle"} />
-              <StatChip label="Completed" value={String(progress.completed)} tone={progress.completed ? "ready" : "idle"} />
-              <StatChip label="Failed" value={String(progress.failed)} tone={progress.failed ? "error" : "idle"} />
-            </div>
-            {deferredQueue.length === 0 ? (
-              <div className="empty-state">
-                Queue is empty. Add a URL to load probe metadata and unlock selection controls.
-              </div>
-            ) : (
-              <ul className="queue-list">
-                {deferredQueue.map((item) => {
-                  const isSelected = item.id === appState?.selected_item_id;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        className={`queue-row${isSelected ? " selected" : ""}`}
-                        disabled={controlsDisabled}
-                        onClick={() => void handleSelectItem(item.id)}
-                        type="button"
-                      >
-                        <div className="queue-row-top">
-                          <StatusBadge tone={statusToneFromJob(item.status)} value={item.status} />
-                          <span className="queue-row-step">{formatStepLabel(item.processing_step)}</span>
-                        </div>
-                        <strong className="queue-row-title">{item.title || item.source_url}</strong>
-                        <span className="queue-row-subtitle">
-                          {item.probe?.channel || readableSource(item.source_url)}
-                        </span>
-                        <span className="queue-row-meta">
-                          {item.mode} | {item.quality || "quality pending"} |{" "}
-                          {formatDuration(item.probe?.duration ?? 0)}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          </div>
+          <form className="intake-form" onSubmit={handleAddUrl}>
+            <input
+              aria-label="YouTube URL"
+              className="url-input"
+              disabled={controlsDisabled}
+              onChange={(event) => setUrlInput(event.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={urlInput}
+            />
+            <button
+              className="primary-button"
+              disabled={controlsDisabled || !urlInput.trim()}
+              type="submit"
+            >
+              Add to queue
+            </button>
+          </form>
         </section>
 
-        <section className="secondary-column">
-          <section className="panel selection-panel">
+        <section className="workspace-block folder-block">
+          <div className="folder-copy">
+            <p className="section-label">Output folder</p>
+            <div className="path-chip" title={outputDir || "Waiting for runtime state"}>
+              {outputDir ? compactPath(outputDir) : "Waiting for runtime state"}
+            </div>
+          </div>
+          <button
+            className="secondary-button"
+            disabled={controlsDisabled}
+            onClick={() => void handlePickOutputDir()}
+            type="button"
+          >
+            Choose folder
+          </button>
+        </section>
+
+        <div className="workspace-body">
+          <section className="workspace-block current-block">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Selection</p>
                 <h2>Current item</h2>
+                <p className="section-note">Review the selected queue item before downloading.</p>
               </div>
-              {selectedItem ? (
-                <StatusBadge tone={statusToneFromJob(selectedItem.status)} value={selectedItem.status} />
-              ) : null}
             </div>
             {selectedItem ? (
               <>
@@ -456,57 +425,49 @@ function App() {
                   </div>
                   <div className="selected-copy">
                     <h3>{selectedItem.title || "Untitled queue item"}</h3>
-                    <p className="selected-meta">
-                      {selectedItem.probe?.channel || readableSource(selectedItem.source_url)}
-                    </p>
-                    <p className="selected-meta">
-                      {formatDuration(selectedItem.probe?.duration ?? 0)} | updated{" "}
-                      {formatTimestamp(selectedItem.updated_at)}
-                    </p>
+                    <p className="selected-meta">{buildItemSubtitle(selectedItem)}</p>
+                    <p className="selected-meta">{describeQueueStatus(selectedItem)}</p>
                   </div>
                 </div>
-
+                <div className="field">
+                  <label htmlFor="mode-toggle">Download type</label>
+                  <div className="toggle-group" id="mode-toggle">
+                    {(["video", "audio"] as DownloadMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        className={`toggle-chip${currentMode === mode ? " active" : ""}`}
+                        disabled={controlsDisabled}
+                        onClick={() => void handleModeChange(mode)}
+                        type="button"
+                      >
+                        {formatModeLabel(mode)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="field-grid">
-                  <div className="field">
-                    <label htmlFor="mode-toggle">Mode</label>
-                    <div className="toggle-group" id="mode-toggle">
-                      {(["video", "audio"] as DownloadMode[]).map((mode) => (
-                        <button
-                          key={mode}
-                          className={`toggle-chip${selection?.mode === mode ? " active" : ""}`}
-                          disabled={controlsDisabled}
-                          onClick={() => void handleModeChange(mode)}
-                          type="button"
-                        >
-                          {mode}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="field">
-                    <label htmlFor="quality-select">Quality</label>
-                    <select
-                      id="quality-select"
-                      className="quality-select"
-                      disabled={controlsDisabled || !selection?.quality_options.length}
-                      onChange={(event) => void handleQualityChange(event)}
-                      value={selection?.quality ?? ""}
-                    >
-                      {selection?.quality_options.map((quality) => (
-                        <option key={quality} value={quality}>
-                          {quality}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <SelectField
+                    disabled={controlsDisabled || !formatModel.qualityChoices.length}
+                    id="quality-select"
+                    label="Quality"
+                    onChange={(event) => void handleQualityChange(event)}
+                    options={formatModel.qualityChoices}
+                    value={selectedFormatOption?.qualityValue ?? ""}
+                  />
+                  <SelectField
+                    disabled={controlsDisabled || !formatModel.fileFormatChoices.length}
+                    id="file-format-select"
+                    label="File format"
+                    onChange={(event) => void handleFileFormatChange(event)}
+                    options={formatModel.fileFormatChoices}
+                    value={selectedFormatOption?.fileFormatValue ?? ""}
+                  />
                 </div>
-
-                <div className="detail-grid compact">
-                  <Detail label="Saved format" value={selectedItem.selected_format_id || "pending"} mono />
-                  <Detail label="Source" value={selectedItem.source_url} mono />
+                <div className="selection-summary">
+                  <span>{formatModeLabel(currentMode)}</span>
+                  <span>{selectedFormatOption?.qualityLabel ?? "Quality pending"}</span>
+                  <span>{selectedFormatOption?.fileFormatLabel ?? "Format pending"}</span>
                 </div>
-
                 <div className="action-row">
                   <button
                     className="primary-button"
@@ -519,51 +480,101 @@ function App() {
                 </div>
               </>
             ) : (
-              <div className="empty-state">Select or add an item to unlock controls.</div>
+              <div className="empty-state">Add a link or select an item from the queue to continue.</div>
             )}
           </section>
 
-          <section className="panel status-panel">
+          <section className="workspace-block queue-block">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Status</p>
-                <h2>Download and output</h2>
+                <h2>Queue</h2>
+                <p className="section-note">
+                  {progress.total === 0
+                    ? "Your queue is empty."
+                    : `${progress.total} item${progress.total === 1 ? "" : "s"} in this session.`}
+                </p>
               </div>
-              <StatusBadge tone={statusTone} value={bridgeError ? "attention" : "current"} />
             </div>
-
-            <div className={`status-banner tone-${statusTone}`}>
-              <strong>{selectedItem ? formatStepLabel(selectedItem.processing_step) : "Waiting for input"}</strong>
-              <p>{shellMessage}</p>
-            </div>
-
-            <div className="detail-grid">
-              <Detail
-                label="Item detail"
-                value={
-                  selectedItem?.status_detail ||
-                  "The backend has not emitted a detailed status message for this item yet."
-                }
-              />
-              <Detail
-                label="Output path"
-                value={selectedItem?.output_path || "No file has been written yet."}
-                mono
-              />
-              <Detail
-                label="Error"
-                value={bridgeError || selectedItem?.error_message || "None"}
-              />
-            </div>
+            {deferredQueue.length === 0 ? (
+              <div className="empty-state">Queue is empty. Add a link to load your first item.</div>
+            ) : (
+              <ul className="queue-list">
+                {deferredQueue.map((item) => {
+                  const isSelected = item.id === appState?.selected_item_id;
+                  const itemFormat = resolveQueueFormatOption(item);
+                  return (
+                    <li key={item.id}>
+                      <button
+                        className={`queue-row${isSelected ? " selected" : ""}`}
+                        disabled={controlsDisabled}
+                        onClick={() => void handleSelectItem(item.id)}
+                        type="button"
+                      >
+                        <strong className="queue-row-title">{item.title || item.source_url}</strong>
+                        <span className="queue-row-subtitle">{buildItemSubtitle(item)}</span>
+                        <span className="queue-row-meta">
+                          {[describeQueueStatus(item), itemFormat?.qualityLabel, itemFormat?.fileFormatLabel]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
+        </div>
+
+        <section className="workspace-block status-block">
+          <div className="section-heading">
+            <div>
+              <h2>Status and output</h2>
+              <p className="section-note">Track the current step and where the file will be saved.</p>
+            </div>
+          </div>
+          <div className={`status-banner tone-${statusTone}`}>
+            <strong>{formatPrimaryStatusHeadline(selectedItem, bridgeError)}</strong>
+            <p>{shellMessage}</p>
+          </div>
+          <div className="status-grid">
+            <SurfaceValue
+              label="Current folder"
+              mono
+              title={outputDir}
+              value={outputDir ? compactPath(outputDir, 4) : "Waiting for runtime state"}
+            />
+            <SurfaceValue
+              label="Current item"
+              value={selectedItem ? describeQueueStatus(selectedItem) : "Waiting for your first queue item."}
+            />
+            <SurfaceValue
+              label="Saved file"
+              mono
+              title={selectedItem?.output_path ?? ""}
+              value={
+                selectedItem?.output_path
+                  ? compactPath(selectedItem.output_path, 4)
+                  : "No file has been written yet."
+              }
+            />
+            <SurfaceValue
+              label={bridgeError || selectedItem?.error_message ? "Problem" : "Next step"}
+              tone={bridgeError || selectedItem?.error_message ? "error" : "idle"}
+              value={bridgeError || selectedItem?.error_message || nextStepGuidance(selectedItem)}
+            />
+          </div>
         </section>
       </main>
 
       <section className="panel debug-shell">
         <div className="debug-toggle-row">
           <div>
-            <p className="eyebrow">Debug</p>
+            <p className="section-label">Debug</p>
             <h2>Runtime details</h2>
+            <p className="section-note">
+              Hidden from the main download workspace unless you need inspect or runtime data.
+            </p>
           </div>
           <button
             className="secondary-button"
@@ -573,13 +584,11 @@ function App() {
             {debugOpen ? "Hide debug" : "Show debug"}
           </button>
         </div>
-
         {debugOpen ? (
           <div className="debug-layout">
             <div className="debug-toolbar">
-              <span className="section-note">
-                Cursor {bridgeMeta?.event_cursor ?? 0} | last response events {debugEventCount} | API{" "}
-                {runtimeInfo?.bridge.api_version ?? bridgeMeta?.api_version ?? "pending"}
+              <span className="debug-summary">
+                {`Connection ${formatConnectionState(connectionState)} • cursor ${bridgeMeta?.event_cursor ?? 0} • last response events ${debugEventCount} • last sync ${lastStateSyncAt || "pending"} • API ${runtimeInfo?.bridge.api_version ?? bridgeMeta?.api_version ?? "pending"}`}
               </span>
               <div className="debug-actions">
                 <button
@@ -608,34 +617,15 @@ function App() {
                 </button>
               </div>
             </div>
-
             <div className="debug-grid">
               <section className="debug-card">
                 <h3>Runtime</h3>
                 <dl className="detail-grid compact">
-                  <Detail
-                    label="Project root"
-                    value={appState?.runtime.project_root ?? "pending"}
-                    mono
-                  />
-                  <Detail
-                    label="Output dir"
-                    value={appState?.runtime.output_dir ?? "pending"}
-                    mono
-                  />
-                  <Detail
-                    label="State file"
-                    value={appState?.runtime.state_file ?? "pending"}
-                    mono
-                  />
-                  <Detail
-                    label="ffmpeg"
-                    value={formatToolStatus(appState?.runtime.ffmpeg)}
-                  />
-                  <Detail
-                    label="ffprobe"
-                    value={formatToolStatus(appState?.runtime.ffprobe)}
-                  />
+                  <Detail label="Project root" mono value={appState?.runtime.project_root ?? "pending"} />
+                  <Detail label="Output dir" mono value={appState?.runtime.output_dir ?? "pending"} />
+                  <Detail label="State file" mono value={appState?.runtime.state_file ?? "pending"} />
+                  <Detail label="ffmpeg" value={formatToolStatus(appState?.runtime.ffmpeg)} />
+                  <Detail label="ffprobe" value={formatToolStatus(appState?.runtime.ffprobe)} />
                   <Detail
                     label="Update model"
                     value={
@@ -662,7 +652,6 @@ function App() {
                   />
                 </dl>
               </section>
-
               <section className="debug-card">
                 <h3>Inspect output</h3>
                 <pre className="json-block">
@@ -683,40 +672,58 @@ function App() {
   );
 }
 
-function Metric({
+function SelectField({
+  disabled,
+  id,
   label,
-  tone,
+  onChange,
+  options,
   value,
 }: {
+  disabled: boolean;
+  id: string;
   label: string;
-  tone?: Tone;
+  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  options: Array<{ label: string; value: string }>;
   value: string;
 }) {
   return (
-    <div className={`metric${tone ? ` tone-${tone}` : ""}`}>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <select
+        className="select-control"
+        disabled={disabled}
+        id={id}
+        onChange={onChange}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
 
-function StatusBadge({ tone, value }: { tone: Tone; value: string }) {
-  return <span className={`status-badge tone-${tone}`}>{value}</span>;
-}
-
-function StatChip({
+function SurfaceValue({
   label,
+  mono,
+  title,
   tone,
   value,
 }: {
   label: string;
+  mono?: boolean;
+  title?: string;
   tone?: Tone;
   value: string;
 }) {
   return (
-    <div className={`stat-chip${tone ? ` tone-${tone}` : ""}`}>
+    <div className={`surface-value${tone ? ` tone-${tone}` : ""}`} title={title || value}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong className={mono ? "mono" : ""}>{value}</strong>
     </div>
   );
 }
@@ -738,83 +745,6 @@ function Detail({
   );
 }
 
-function summarizeQueue(queue: QueueItemSnapshot[]) {
-  let queued = 0;
-  let running = 0;
-  let completed = 0;
-  let failed = 0;
-
-  for (const item of queue) {
-    switch (item.status) {
-      case "queued":
-        queued += 1;
-        break;
-      case "running":
-        running += 1;
-        break;
-      case "completed":
-        completed += 1;
-        break;
-      case "failed":
-      case "cancelled":
-        failed += 1;
-        break;
-      default:
-        break;
-    }
-  }
-
-  return {
-    queued,
-    running,
-    completed,
-    failed,
-    total: queue.length,
-  };
-}
-
-function formatDuration(durationSeconds: number) {
-  if (!durationSeconds) {
-    return "unknown duration";
-  }
-  const hours = Math.floor(durationSeconds / 3600);
-  const minutes = Math.floor((durationSeconds % 3600) / 60);
-  const seconds = durationSeconds % 60;
-  if (hours) {
-    return `${hours.toString().padStart(2, "0")}:${minutes
-      .toString()
-      .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatTimestamp(rawValue: string) {
-  if (!rawValue) {
-    return "unknown";
-  }
-  const timestamp = new Date(rawValue);
-  if (Number.isNaN(timestamp.getTime())) {
-    return rawValue;
-  }
-  return timestamp.toLocaleString();
-}
-
-function formatToolStatus(
-  tool?: {
-    is_available: boolean;
-    path: string;
-    source: string;
-  },
-) {
-  if (!tool) {
-    return "pending";
-  }
-  if (!tool.is_available) {
-    return "missing";
-  }
-  return tool.path ? `${tool.source}: ${tool.path}` : tool.source;
-}
-
 function formatError(error: unknown) {
   if (error instanceof BridgeClientError) {
     return error.message;
@@ -823,69 +753,6 @@ function formatError(error: unknown) {
     return error.message;
   }
   return "Unknown bridge error.";
-}
-
-function formatConnectionState(state: ConnectionState) {
-  switch (state) {
-    case "ready":
-      return "Connected";
-    case "error":
-      return "Error";
-    default:
-      return "Connecting";
-  }
-}
-
-function resolveStatusTone(selectedItem: QueueItemSnapshot | null, bridgeError: string): Tone {
-  if (bridgeError) {
-    return "error";
-  }
-  if (!selectedItem) {
-    return "idle";
-  }
-  return statusToneFromJob(selectedItem.status);
-}
-
-function statusToneFromJob(status: QueueItemSnapshot["status"]): Tone {
-  switch (status) {
-    case "completed":
-      return "ready";
-    case "running":
-      return "busy";
-    case "failed":
-    case "cancelled":
-      return "error";
-    default:
-      return "idle";
-  }
-}
-
-function formatStepLabel(step: string) {
-  switch (step) {
-    case "queued":
-      return "Queued";
-    case "preparing":
-      return "Preparing";
-    case "downloading":
-      return "Downloading";
-    case "postprocessing":
-      return "Postprocessing";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return step;
-  }
-}
-
-function readableSource(sourceUrl: string) {
-  try {
-    const parsed = new URL(sourceUrl);
-    return parsed.host.replace(/^www\./, "");
-  } catch {
-    return sourceUrl;
-  }
 }
 
 export default App;

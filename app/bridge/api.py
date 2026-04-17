@@ -133,6 +133,36 @@ class AppBridgeApi:
         state = self._call_controller(self.controller.select_quality, quality)
         return self._state_response(state)
 
+    def pick_output_dir(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
+        if self._download_is_active():
+            return self._error_response(
+                code="download_in_progress",
+                message="Bridge mutations are blocked while a download is running.",
+            )
+
+        current_output_dir = str(self._latest_state_copy().get("runtime", {}).get("output_dir", ""))
+        try:
+            selected_dir = self._open_output_dir_dialog(current_output_dir)
+        except RuntimeError as error:
+            return self._error_response(code="output_dir_dialog_failed", message=str(error))
+
+        if not selected_dir:
+            return self._response(
+                data={
+                    "cancelled": True,
+                    "state": self._latest_state_copy(),
+                }
+            )
+
+        state = self._call_controller(self.controller.set_output_dir, Path(selected_dir))
+        return self._response(
+            data={
+                "cancelled": False,
+                "state": state.to_dict(),
+            }
+        )
+
     def start_download(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
         if self._download_is_active():
             return self._error_response(
@@ -361,3 +391,53 @@ class AppBridgeApi:
             return max(0, int(raw_value))
         except (TypeError, ValueError):
             return 0
+
+    @staticmethod
+    def _open_output_dir_dialog(initial_dir: str) -> str:
+        dialog_error: Exception | None = None
+
+        try:
+            import webview
+
+            window = next(iter(getattr(webview, "windows", [])), None)
+            if window is not None:
+                folder_dialog = getattr(getattr(webview, "FileDialog", None), "FOLDER", None)
+                if folder_dialog is None:
+                    folder_dialog = getattr(webview, "FOLDER_DIALOG", None)
+                result = window.create_file_dialog(
+                    dialog_type=folder_dialog,
+                    directory=initial_dir,
+                )
+                return AppBridgeApi._normalize_dialog_selection(result)
+        except Exception as error:  # pragma: no cover - dialog backend depends on GUI runtime
+            dialog_error = error
+
+        try:
+            from tkinter import Tk, filedialog
+
+            root = Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            try:
+                selected_dir = filedialog.askdirectory(
+                    initialdir=initial_dir or "",
+                    title="Choose output folder",
+                    parent=root,
+                )
+            finally:
+                root.destroy()
+            return str(selected_dir).strip()
+        except Exception as error:  # pragma: no cover - dialog backend depends on GUI runtime
+            if dialog_error is not None:
+                raise RuntimeError(
+                    f"Unable to open an output folder picker ({dialog_error}; {error})."
+                ) from error
+            raise RuntimeError(f"Unable to open an output folder picker ({error}).") from error
+
+    @staticmethod
+    def _normalize_dialog_selection(result: object) -> str:
+        if not result:
+            return ""
+        if isinstance(result, (list, tuple)):
+            return str(result[0]).strip() if result else ""
+        return str(result).strip()

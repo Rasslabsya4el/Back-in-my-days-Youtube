@@ -64,6 +64,7 @@ class QueueItemDownloader:
         item: QueueItem,
         *,
         on_update: Callable[[QueueItem], None] | None = None,
+        output_dir: Path | None = None,
     ) -> Path:
         self.config.ensure_directories()
         postprocessor = self._build_postprocessor()
@@ -78,7 +79,7 @@ class QueueItemDownloader:
                 detail="Validating stored selection and runtime tools.",
                 on_update=on_update,
             )
-            plan = self._build_plan(item)
+            plan = self._build_plan(item, output_dir=output_dir)
             self._ensure_required_tools(postprocessor, item.mode)
             self._prepare_temp_dir(temp_dir)
             self._remove_if_exists(plan.output_path)
@@ -142,7 +143,7 @@ class QueueItemDownloader:
     def inspect_output(self, media_path: Path) -> dict[str, object] | None:
         return self._build_postprocessor().inspect_output(media_path)
 
-    def _build_plan(self, item: QueueItem) -> DownloadPlan:
+    def _build_plan(self, item: QueueItem, *, output_dir: Path | None = None) -> DownloadPlan:
         if not item.probe:
             raise DownloadPipelineError(
                 JobStep.PREPARING,
@@ -155,7 +156,7 @@ class QueueItemDownloader:
             )
 
         item.title = item.title or item.probe.title
-        output_path = self._predict_output_path(item)
+        output_path = self._predict_output_path(item, output_dir=output_dir)
         format_ids = [part.strip() for part in item.selected_format_id.split("+") if part.strip()]
         if not format_ids:
             raise DownloadPipelineError(
@@ -415,11 +416,12 @@ class QueueItemDownloader:
                 return option
         return None
 
-    def _predict_output_path(self, item: QueueItem) -> Path:
+    def _predict_output_path(self, item: QueueItem, *, output_dir: Path | None = None) -> Path:
         suffix = ".m4a" if item.mode == DownloadMode.AUDIO else ".mp4"
         title = item.title or item.source_url
         safe_title = self._sanitize_filename(title)
-        return self.config.output_dir / f"{safe_title}-{item.id[:8]}{suffix}"
+        target_dir = output_dir or self.config.output_dir
+        return target_dir / f"{safe_title}-{item.id[:8]}{suffix}"
 
     def _prepare_temp_dir(self, temp_dir: Path) -> None:
         shutil.rmtree(temp_dir, ignore_errors=True)

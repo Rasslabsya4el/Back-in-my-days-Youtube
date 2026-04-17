@@ -16,6 +16,7 @@ type BridgeMethodName =
   | "select_item"
   | "select_mode"
   | "select_quality"
+  | "pick_output_dir"
   | "start_download"
   | "get_runtime_info"
   | "inspect_output";
@@ -26,6 +27,7 @@ export interface AppBridgeApiSurface {
   select_item(payload?: { item_id?: string } | string): Promise<unknown>;
   select_mode(payload?: { mode: "video" | "audio" } | string): Promise<unknown>;
   select_quality(payload?: { quality: string } | string): Promise<unknown>;
+  pick_output_dir(): Promise<unknown>;
   start_download(payload?: { item_id?: string } | string): Promise<unknown>;
   get_runtime_info(): Promise<unknown>;
   inspect_output(payload?: { output_path?: string } | string): Promise<unknown>;
@@ -61,6 +63,10 @@ class BridgeClient {
 
   selectQuality(quality: string) {
     return this.call<AppStatePayload>("select_quality", { quality });
+  }
+
+  pickOutputDir() {
+    return this.call<AppStatePayload>("pick_output_dir");
   }
 
   startDownload(itemId?: string) {
