@@ -175,7 +175,8 @@ class AppBridgeApi:
             },
         )
 
-    def get_runtime_info(self) -> dict[str, Any]:
+    def get_runtime_info(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
         state = self._latest_state_copy()
         return self._response(
             data={

@@ -4,9 +4,10 @@
 
 UI/runtime stack v1:
 - Python 3.12
-- Tkinter as a temporary diagnostic shell over a UI-agnostic Python controller layer
-- `pywebview` in the Poetry environment for the future `React + pywebview` desktop shell
-- a JSON-safe Python bridge for the future `React + pywebview` desktop shell
+- React + TypeScript + Vite for the primary desktop-shell UI surface
+- Tkinter as a fallback diagnostic shell over the same UI-agnostic Python controller layer
+- `pywebview` in the Poetry environment for the desktop shell host
+- a JSON-safe Python bridge consumed by both shells
 - `yt-dlp` for YouTube metadata and formats probing
 - stdlib (`dataclasses`, `enum`, `json`, `pathlib`) for config and queue state
 
@@ -20,7 +21,27 @@ poetry install
 ```
 
 Poetry is the source of truth for Python dependencies in this repository. `pyproject.toml` declares them and `poetry.lock` pins the resolved set.
-`poetry install` now also brings in `pywebview` for the bridge-host bootstrap.
+`poetry install` also brings in `pywebview` for the bridge host.
+
+## Frontend bootstrap
+
+Install the frontend workspace once from the repository root:
+
+```powershell
+npm install
+```
+
+Run the Vite dev server:
+
+```powershell
+npm run dev
+```
+
+Build the React shell into `frontend/dist`:
+
+```powershell
+npm run build
+```
 
 ## Local start
 
@@ -30,26 +51,35 @@ Run the desktop shell:
 poetry run python main.py
 ```
 
-Run the bridge-shell bootstrap instead of Tkinter:
+By default the bridge host loads the built React UI from `frontend/dist/index.html` when the build exists.
+If the build is missing, the bridge host falls back to a minimal diagnostic HTML page with build instructions.
+
+Run the bridge shell explicitly:
 
 ```powershell
 poetry run python main.py --ui-shell bridge
 ```
 
-To point the host at a future React dev server:
+Point the bridge shell at a Vite dev server instead of built assets:
 
 ```powershell
 poetry run python main.py --ui-shell bridge --bridge-start-url http://localhost:5173
 ```
 
+Run the Tk diagnostic shell explicitly:
+
+```powershell
+poetry run python main.py --ui-shell tk
+```
+
 If the local `pywebview` backend cannot start, the command exits cleanly with `bridge_host=blocked ...` on stderr and exit code `2` instead of printing a traceback.
 
-After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and stores the selected quality label plus `selected_format_id` in queue state. `Download Selected` then runs a real pipeline:
+After you paste a YouTube URL into the shell and add it to the queue, the app probes metadata and stores the selected quality label plus `selected_format_id` in queue state. `Start download` then runs a real pipeline:
 - `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
 - `ffmpeg` merges or converts the media into a deterministic final file in `output/`
 - final output contract is `video -> .mp4`, `audio -> .m4a`
 
-The orchestration and state mutations now live in `app/controller/`. `app/shell.py` only binds controller state to Tkinter widgets, and `app/bridge/` exposes the same controller via JSON-safe payloads for `pywebview` JS calls, so the backend stays reusable across both shells.
+The orchestration and state mutations live in `app/controller/`. `app/shell.py` only binds controller state to Tkinter widgets, `frontend/` renders the first React shell iteration, and `app/bridge/` exposes the same controller via JSON-safe payloads for `pywebview` JS calls, so the backend stays reusable across both shells.
 
 For video items, saved muxed formats are remuxed/transcoded into `mp4`. Saved video-only formats automatically pull the best saved companion audio format from the persisted probe state and merge both streams.
 
@@ -63,7 +93,7 @@ Application start creates:
 
 ## Smoke checks
 
-UI startup smoke:
+Tk startup smoke:
 
 ```powershell
 poetry run python main.py --smoke-start
@@ -108,7 +138,7 @@ Bridge host startup smoke:
 poetry run python main.py --smoke-bridge-host
 ```
 
-This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. It is the narrow readiness check for the desktop host path that `ТЗ-OBS-FE-REACT-03` will reuse.
+This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. If a React build exists, the smoke uses the built shell; otherwise it uses either the provided `--bridge-start-url` or the fallback diagnostic HTML.
 
 Download smoke using a persisted queue item:
 
@@ -138,7 +168,9 @@ The `pywebview` bridge exposes these Python methods for JS:
 - `get_runtime_info`
 - `inspect_output`
 
-`get_app_state` is the refresh primitive. The future web UI should poll it with `since_event_id` and consume the returned `events` array of full state snapshots. `start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress/status updates into the retained event queue while the background worker is running.
+`frontend/src/bridge.ts` wraps these methods in a typed TS client. `get_app_state` is the refresh primitive: the React shell polls it with `since_event_id` and consumes the returned `events` array of full state snapshots. `start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress and status updates into the retained event queue while the background worker is running.
+
+The React shell intentionally stays coarse in its progress surface: it renders queue-item statuses and steps, not simulated byte progress that the backend does not expose yet.
 
 The bridge shell bootstrap intentionally stays minimal. In the locked Poetry environment it should be runnable. If the local `pywebview` runtime or GUI backend is unavailable, `main.py --ui-shell bridge` fails fast with a short `bridge_host=blocked` message instead of silently falling back to Tkinter or surfacing a traceback.
 

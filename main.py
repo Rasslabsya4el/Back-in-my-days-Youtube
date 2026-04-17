@@ -19,8 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ui-shell",
         choices=("tk", "bridge"),
-        default="tk",
-        help="Launch the legacy Tk shell or the pywebview bridge shell bootstrap.",
+        default="bridge",
+        help="Launch the React bridge shell or the legacy Tk diagnostic shell.",
     )
     parser.add_argument(
         "--bridge-start-url",
@@ -527,7 +527,9 @@ def run_bridge_shell(*, start_url: str | None, debug: bool) -> None:
 def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
     controller = AppController(create_default_config())
     bridge = AppBridgeApi(controller)
-    environment = PywebviewHost(bridge).run(
+    host = PywebviewHost(bridge)
+    launch_target = host.resolve_launch_target(start_url=start_url)
+    environment = host.run(
         start_url=start_url,
         debug=False,
         auto_close_after=1.0,
@@ -538,7 +540,8 @@ def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
                 "bridge_host_smoke=ok",
                 f"pywebview_version={environment.pywebview_version!r}",
                 f"module_path={environment.module_path!r}",
-                f"entrypoint={'url' if start_url else 'inline_html'}",
+                f"entrypoint={launch_target.kind!r}",
+                f"entrypoint_value={launch_target.value!r}",
                 "startup_path=entered",
                 "auto_closed=True",
             ]

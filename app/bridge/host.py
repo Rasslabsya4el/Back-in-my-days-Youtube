@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
 
 from .api import AppBridgeApi
@@ -56,8 +57,9 @@ DEFAULT_BRIDGE_HTML = """\
   <body>
     <h1>YT Downloader bridge shell</h1>
     <p>
-      This is a minimal diagnostic host for the future React + pywebview UI. It polls the
-      Python bridge and shows the latest JSON-safe payloads without depending on Tkinter.
+      React frontend assets were not found under <code>frontend/dist</code>. Build them with
+      <code>npm install</code> and <code>npm run build</code>, or point the shell at a running
+      Vite dev server with <code>--bridge-start-url http://localhost:5173</code>.
     </p>
     <div class="panel">
       <strong>Runtime</strong>
@@ -118,6 +120,12 @@ class BridgeHostEnvironment:
     module_path: str
 
 
+@dataclass(slots=True, frozen=True)
+class BridgeLaunchTarget:
+    kind: str
+    value: str
+
+
 class PywebviewHost:
     title = "YT Downloader bridge shell"
 
@@ -131,6 +139,17 @@ class PywebviewHost:
             module_path=getattr(webview, "__file__", "") or "",
         )
 
+    def resolve_launch_target(self, *, start_url: str | None = None) -> BridgeLaunchTarget:
+        normalized_start_url = (start_url or "").strip()
+        if normalized_start_url:
+            return BridgeLaunchTarget(kind="url", value=normalized_start_url)
+
+        build_index = self._built_index_path()
+        if build_index.exists():
+            return BridgeLaunchTarget(kind="file", value=build_index.as_uri())
+
+        return BridgeLaunchTarget(kind="inline_html", value="")
+
     def run(
         self,
         *,
@@ -140,6 +159,7 @@ class PywebviewHost:
     ) -> BridgeHostEnvironment:
         environment = self.probe_environment()
         webview = self._load_webview()
+        launch_target = self.resolve_launch_target(start_url=start_url)
         window_kwargs = {
             "js_api": self.bridge_api,
             "width": 1180,
@@ -154,8 +174,12 @@ class PywebviewHost:
             )
 
         try:
-            if start_url:
-                window = webview.create_window(self.title, url=start_url, **window_kwargs)
+            if launch_target.kind in {"url", "file"}:
+                window = webview.create_window(
+                    self.title,
+                    url=launch_target.value,
+                    **window_kwargs,
+                )
             else:
                 window = webview.create_window(self.title, html=DEFAULT_BRIDGE_HTML, **window_kwargs)
 
@@ -189,3 +213,7 @@ class PywebviewHost:
                 "pywebview is not available in the active Poetry environment. Run `poetry install`."
             ) from error
         return webview
+
+    @staticmethod
+    def _built_index_path() -> Path:
+        return Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
