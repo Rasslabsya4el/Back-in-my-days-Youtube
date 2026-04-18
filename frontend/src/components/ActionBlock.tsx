@@ -40,7 +40,7 @@ export function ActionBlock({
   const selectedItemRunning = selectedItem?.status === "running";
 
   return (
-    <div className="action-block">
+    <div className="action-block" data-testid="action-block">
       <div className="action-head">
         <div className="action-head-copy">
           <span className="action-kicker">Download setup</span>
@@ -109,7 +109,9 @@ export function ActionBlock({
       </div>
 
       <div className="action-footer">
-        <span className="action-hint">{actionHint}</span>
+        <span className="action-hint" data-testid="action-block-hint">
+          {actionHint}
+        </span>
         <div className="action-buttons">
           <button
             className="btn primary lg"

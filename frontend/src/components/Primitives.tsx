@@ -15,10 +15,12 @@ export function Thumb({
   src,
   alt,
   size,
+  testIdPrefix,
 }: {
   src: string;
   alt: string;
   size?: "default" | "tiny" | "mini";
+  testIdPrefix?: string;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -31,14 +33,23 @@ export function Thumb({
 
   if (!src || failed) {
     return (
-      <div aria-hidden={size !== "default"} className={cls}>
-        <span className="placeholder">{size === "mini" ? "." : "No preview"}</span>
+      <div
+        aria-hidden={size !== "default"}
+        className={cls}
+        data-testid={testIdPrefix}
+      >
+        <span
+          className="placeholder"
+          data-testid={testIdPrefix ? `${testIdPrefix}-placeholder` : undefined}
+        >
+          {size === "mini" ? "." : "No preview"}
+        </span>
       </div>
     );
   }
 
   return (
-    <div className={cls}>
+    <div className={cls} data-testid={testIdPrefix}>
       <img
         alt={alt}
         className={loaded ? "loaded" : ""}
@@ -47,9 +58,15 @@ export function Thumb({
         onError={() => setFailed(true)}
         onLoad={() => setLoaded(true)}
         src={src}
+        data-testid={testIdPrefix ? `${testIdPrefix}-image` : undefined}
       />
       {!loaded ? (
-        <span className="placeholder">{size === "mini" ? "." : "Loading preview"}</span>
+        <span
+          className="placeholder"
+          data-testid={testIdPrefix ? `${testIdPrefix}-placeholder` : undefined}
+        >
+          {size === "mini" ? "." : "Loading preview"}
+        </span>
       ) : null}
     </div>
   );
@@ -58,27 +75,40 @@ export function Thumb({
 export function StatusSurface({
   status,
   variant = "row",
+  testIdPrefix,
 }: {
   status: UnifiedStatus;
   variant?: "row" | "block";
+  testIdPrefix?: string;
 }) {
   return (
     <div
       className={`status tone-${status.tone}${variant === "block" ? " block" : ""}`}
+      data-testid={testIdPrefix}
       title={status.detail || status.headline}
     >
-      <span className="status-label">{status.label}</span>
+      <span className="status-label" data-testid={testIdPrefix ? `${testIdPrefix}-label` : undefined}>
+        {status.label}
+      </span>
       {variant === "block" ? (
         <>
           {status.headline ? <strong className="status-headline">{status.headline}</strong> : null}
           {status.detail ? (
-            <span className={`status-detail${status.detailMono ? " mono" : ""}`}>
+            <span
+              className={`status-detail${status.detailMono ? " mono" : ""}`}
+              data-testid={testIdPrefix ? `${testIdPrefix}-detail` : undefined}
+            >
               {status.detail}
             </span>
           ) : null}
         </>
       ) : status.detail ? (
-        <span className="status-detail">{status.detail}</span>
+        <span
+          className="status-detail"
+          data-testid={testIdPrefix ? `${testIdPrefix}-detail` : undefined}
+        >
+          {status.detail}
+        </span>
       ) : null}
     </div>
   );
@@ -167,6 +197,8 @@ export function QueueRowRail({
     <button
       aria-pressed={selected}
       className={`queue-row rail${selected ? " selected" : ""}`}
+      data-queue-item-id={item.id}
+      data-testid="queue-row-rail"
       disabled={disabled}
       onClick={onClick}
       title={`${item.title || item.source_url} - ${describeQueueStatus(item)}`}

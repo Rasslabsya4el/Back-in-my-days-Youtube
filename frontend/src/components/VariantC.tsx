@@ -36,9 +36,10 @@ export function VariantC(props: VariantProps) {
             <h2>Queue</h2>
             <span className="queue-summary">{queueSummary}</span>
           </div>
-          <div className="queue-header-actions">
+          <div className="queue-header-actions" data-testid="queue-header-actions">
             <button
               className="btn sm"
+              data-testid="queue-start-all"
               disabled={controlsDisabled || props.queuedItemCount === 0}
               onClick={props.onStartAll}
               type="button"
@@ -47,6 +48,7 @@ export function VariantC(props: VariantProps) {
             </button>
             <button
               className="btn sm"
+              data-testid="queue-clear"
               disabled={props.clearQueueDisabled}
               onClick={props.onClearQueue}
               title={props.clearQueueReason}
@@ -92,6 +94,7 @@ export function VariantC(props: VariantProps) {
                 <Thumb
                   alt={selectedItem.title || "Selected media thumbnail"}
                   src={selectedItem.probe?.thumbnail ?? ""}
+                  testIdPrefix="selected-preview"
                 />
               </div>
             </aside>
@@ -122,7 +125,7 @@ export function VariantC(props: VariantProps) {
                 </dl>
               </div>
 
-              <StatusSurface status={selectedStatus} variant="block" />
+              <StatusSurface status={selectedStatus} testIdPrefix="selected-status" variant="block" />
 
               <ActionBlock
                 controlsDisabled={controlsDisabled}

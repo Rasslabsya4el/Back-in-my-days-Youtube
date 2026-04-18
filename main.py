@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import shutil
 import sys
@@ -870,10 +872,33 @@ def _find_option(options: list[FormatOption], format_id: str | None) -> FormatOp
     return None
 
 
-def run_bridge_shell(*, start_url: str | None, debug: bool) -> None:
+def _load_live_ui_harness_helper():
+    helper_path = Path(__file__).resolve().parent / "scripts" / "validation" / "live_ui_harness_support.py"
+    spec = importlib.util.spec_from_file_location("live_ui_harness_support", helper_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load validation helper from {helper_path}.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_bridge_shell(*, start_url: str | None, debug: bool) -> int:
     controller = AppController(create_default_config())
     bridge = AppBridgeApi(controller)
+    harness_config_path = os.environ.get("YT_UI_HARNESS_CONFIG", "").strip()
+    if harness_config_path:
+        helper = _load_live_ui_harness_helper()
+        return int(
+            helper.run_live_ui_harness(
+                bridge_api=bridge,
+                start_url=start_url,
+                debug=debug,
+                config_path=Path(harness_config_path),
+            )
+        )
+
     PywebviewHost(bridge).run(start_url=start_url, debug=debug)
+    return 0
 
 
 def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
@@ -959,10 +984,9 @@ def main() -> int:
 
     if args.ui_shell == "bridge":
         try:
-            run_bridge_shell(start_url=args.bridge_start_url, debug=args.bridge_debug)
+            return run_bridge_shell(start_url=args.bridge_start_url, debug=args.bridge_debug)
         except BridgeHostError as error:
             return _bridge_host_blocked(error)
-        return 0
 
     from app.shell import AppShell
 

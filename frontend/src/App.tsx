@@ -453,8 +453,8 @@ function App() {
 
   return (
     <div className="app-root">
-      <header className="topbar">
-        <form className="url-form" onSubmit={handleAddUrl}>
+      <header className="topbar" data-testid="topbar">
+        <form className="url-form" data-testid="url-form" onSubmit={handleAddUrl}>
           <div className="url-input-shell">
             <input
               aria-label="YouTube URL"
