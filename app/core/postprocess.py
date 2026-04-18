@@ -8,6 +8,7 @@ from typing import Any, Callable
 from ..ffmpeg import BinaryResolution
 from .audio_metadata import (
     AudioMetadata,
+    build_audio_artwork_cover_filter,
     download_artwork,
 )
 from .stage_scheduler import DownloadStageScheduler
@@ -299,6 +300,9 @@ class MediaPostProcessor:
             arguments.extend(["-map", "1:v:0"])
         else:
             arguments.append("-vn")
+
+        if artwork_input is not None:
+            arguments.extend(["-filter:v:0", build_audio_artwork_cover_filter()])
 
         if copy_audio:
             arguments.extend(["-c:a", "copy"])

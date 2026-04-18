@@ -10,7 +10,7 @@ _ARTWORK_SUFFIX_BY_CONTENT_TYPE = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-AUDIO_ARTWORK_TARGET_SIZE = 720
+AUDIO_ARTWORK_CONTRACT = "square_centered_crop_original_resolution_only"
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,12 +51,16 @@ def download_artwork(artwork_url: str, *, working_dir: Path) -> Path | None:
     return artwork_path
 
 
-def build_audio_artwork_cover_filter(*, size: int = AUDIO_ARTWORK_TARGET_SIZE) -> str:
-    normalized_size = max(1, int(size))
-    return (
-        f"scale={normalized_size}:{normalized_size}:force_original_aspect_ratio=increase,"
-        f"crop={normalized_size}:{normalized_size}"
-    )
+def build_audio_artwork_cover_filter() -> str:
+    return "crop='min(iw,ih)':'min(iw,ih)':'(iw-ow)/2':'(ih-oh)/2'"
+
+
+def compute_audio_artwork_square_side(width: int | None, height: int | None) -> int | None:
+    if width is None or height is None:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return min(width, height)
 
 
 def _pick_artwork_suffix(artwork_url: str, content_type: str) -> str:
