@@ -33,21 +33,48 @@ class MediaPostProcessor:
         self._ensure_ffmpeg("ffmpeg is required to produce the final mp4 output.")
         self._remove_if_exists(output_path)
         base_command = self._video_inputs(video_input=video_input, audio_input=audio_input)
+        should_attempt_copy = self._can_remux_windows_friendly(
+            video_input=video_input,
+            audio_input=audio_input,
+        )
 
-        try:
-            self._run_ffmpeg(
-                description="remux video to mp4",
-                arguments=[
-                    *base_command,
-                    *self._video_maps(audio_input=audio_input),
-                    "-c",
-                    "copy",
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
-                ],
-            )
-        except MediaPostprocessError:
+        if should_attempt_copy:
+            try:
+                self._run_ffmpeg(
+                    description="remux video to mp4",
+                    arguments=[
+                        *base_command,
+                        *self._video_maps(audio_input=audio_input),
+                        "-c",
+                        "copy",
+                        "-movflags",
+                        "+faststart",
+                        str(output_path),
+                    ],
+                )
+            except MediaPostprocessError:
+                self._remove_if_exists(output_path)
+                self._run_ffmpeg(
+                    description="transcode video to mp4",
+                    arguments=[
+                        *base_command,
+                        *self._video_maps(audio_input=audio_input),
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "fast",
+                        "-crf",
+                        "23",
+                        "-c:a",
+                        "aac",
+                        "-b:a",
+                        "192k",
+                        "-movflags",
+                        "+faststart",
+                        str(output_path),
+                    ],
+                )
+        else:
             self._remove_if_exists(output_path)
             self._run_ffmpeg(
                 description="transcode video to mp4",
@@ -72,6 +99,23 @@ class MediaPostProcessor:
 
         self._validate_output(output_path, "mp4")
         return output_path
+
+    def _can_remux_windows_friendly(
+        self,
+        *,
+        video_input: Path,
+        audio_input: Path | None,
+    ) -> bool:
+        video_codec = self._probe_primary_codec(video_input, codec_type="video")
+        if video_codec != "h264":
+            return False
+
+        if audio_input is not None:
+            audio_codec = self._probe_primary_codec(audio_input, codec_type="audio")
+            return audio_codec == "aac"
+
+        audio_codec = self._probe_primary_codec(video_input, codec_type="audio")
+        return audio_codec in {"", "aac"}
 
     def finalize_audio(
         self,
@@ -307,6 +351,47 @@ class MediaPostProcessor:
         if audio_input is not None:
             return ["-map", "0:v:0", "-map", "1:a:0"]
         return ["-map", "0:v:0", "-map", "0:a:0?"]
+
+    def _probe_primary_codec(self, media_path: Path, *, codec_type: str) -> str:
+        if not self.ffprobe.is_available or self.ffprobe.path is None:
+            return ""
+
+        command = [
+            str(self.ffprobe.path),
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_streams",
+            str(media_path),
+        ]
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return ""
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            return ""
+
+        streams = payload.get("streams", [])
+        if not isinstance(streams, list):
+            return ""
+
+        for stream in streams:
+            if not isinstance(stream, dict):
+                continue
+            if stream.get("codec_type") != codec_type:
+                continue
+            codec_name = stream.get("codec_name")
+            if codec_name:
+                return str(codec_name)
+        return ""
 
     @staticmethod
     def _validate_output(output_path: Path, expected_suffix: str) -> None:
