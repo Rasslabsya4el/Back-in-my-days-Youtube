@@ -229,33 +229,6 @@ export function formatDuration(durationSeconds: number) {
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export function formatToolStatus(
-  tool?: {
-    is_available: boolean;
-    path: string;
-    source: string;
-  },
-) {
-  if (!tool) {
-    return "pending";
-  }
-  if (!tool.is_available) {
-    return "missing";
-  }
-  return tool.path ? `${tool.source}: ${tool.path}` : tool.source;
-}
-
-export function formatConnectionState(state: "connecting" | "ready" | "error") {
-  switch (state) {
-    case "ready":
-      return "ready";
-    case "error":
-      return "error";
-    default:
-      return "connecting";
-  }
-}
-
 export function formatModeLabel(mode: DownloadMode) {
   return mode === "audio" ? "Audio" : "Video";
 }
@@ -307,7 +280,7 @@ export function buildPrimaryStatusMessage(
       return "The download finished and the file is ready.";
     case "failed":
     case "cancelled":
-      return "This item did not finish. Review the selection and retry, or open debug for technical details.";
+      return "This item did not finish. Review the selection and retry.";
     default:
       return (
         sanitizePrimaryStatus(selectedItem.status_detail) ||
@@ -543,7 +516,7 @@ function sanitizePrimaryStatus(message: string) {
   }
 
   if (isTechnicalStatusMessage(normalized)) {
-    return "Technical details stay in debug so the main workspace can stay focused on the download flow.";
+    return "Technical details stay out of the main workspace so the download flow can stay focused.";
   }
 
   return normalized;

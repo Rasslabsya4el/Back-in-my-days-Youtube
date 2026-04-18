@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { BridgeClientError, bridgeClient } from "./bridge";
-import { DebugDrawer } from "./components/DebugDrawer";
 import { VariantC } from "./components/VariantC";
 import type { VariantProps } from "./components/variant-types";
 import type {
@@ -10,8 +9,6 @@ import type {
   BridgeResponse,
   DownloadMode,
   GetAppStatePayload,
-  InspectOutputPayload,
-  RuntimeInfoPayload,
 } from "./types";
 import {
   buildFormatSelectionModel,
@@ -32,14 +29,8 @@ function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [appState, setAppState] = useState<AppState | null>(null);
   const [bridgeMeta, setBridgeMeta] = useState<BridgeMeta | null>(null);
-  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfoPayload | null>(null);
-  const [inspection, setInspection] = useState<BridgeResponse<InspectOutputPayload> | null>(null);
   const [bridgeError, setBridgeError] = useState("");
   const [mutationBusy, setMutationBusy] = useState(false);
-  const [inspectionBusy, setInspectionBusy] = useState(false);
-  const [debugOpen, setDebugOpen] = useState(false);
-  const [debugEventCount, setDebugEventCount] = useState(0);
-  const [lastStateSyncAt, setLastStateSyncAt] = useState("");
 
   const isMountedRef = useRef(true);
   const cursorRef = useRef(0);
@@ -85,36 +76,17 @@ function App() {
 
       cursorRef.current = response.meta.event_cursor;
       const nextState = "state" in response.data ? response.data.state ?? null : null;
-      const events = "events" in response.data ? response.data.events : [];
-      const nextSyncTime = nextState ? new Date().toLocaleTimeString() : lastStateSyncAt;
 
       startTransition(() => {
         setBridgeMeta(response.meta);
         setConnectionState("ready");
         setBridgeError("");
-        setDebugEventCount(events.length);
         if (nextState) {
           setAppState(nextState);
-          setLastStateSyncAt(nextSyncTime);
         }
       });
     },
   );
-
-  const loadRuntimeInfo = useEffectEvent(async () => {
-    const response = await bridgeClient.getRuntimeInfo();
-    if (!isMountedRef.current) {
-      return;
-    }
-    if (!response.ok) {
-      setBridgeError(response.error?.message ?? "Failed to read runtime info.");
-      return;
-    }
-
-    startTransition(() => {
-      setRuntimeInfo(response.data);
-    });
-  });
 
   const pollAppState = useEffectEvent(async (sinceEventId?: number) => {
     if (pollInFlightRef.current) {
@@ -196,16 +168,9 @@ function App() {
     };
   }, [connectionState, pollAppState]);
 
-  useEffect(() => {
-    if (!debugOpen || connectionState !== "ready") {
-      return;
-    }
-    void loadRuntimeInfo();
-  }, [connectionState, debugOpen, loadRuntimeInfo]);
-
   async function runStateCommand(
     command: Promise<BridgeResponse<{ state: AppState }>>,
-    options?: { resetUrl?: boolean; resetInspection?: boolean; trackBusy?: boolean },
+    options?: { resetUrl?: boolean; trackBusy?: boolean },
   ) {
     const trackBusy = options?.trackBusy ?? true;
     if (trackBusy) {
@@ -219,9 +184,6 @@ function App() {
       applyStatePayload(response);
       if (options?.resetUrl && response.ok) {
         setUrlInput("");
-      }
-      if (options?.resetInspection) {
-        setInspection(null);
       }
     } catch (error) {
       if (!isMountedRef.current) {
@@ -242,7 +204,6 @@ function App() {
       return;
     }
     await runStateCommand(bridgeClient.addUrl(normalized), {
-      resetInspection: true,
       resetUrl: true,
     });
   }
@@ -251,7 +212,7 @@ function App() {
     if (mode === selection?.mode || commandDisabled) {
       return;
     }
-    await runStateCommand(bridgeClient.selectMode(mode), { resetInspection: true });
+    await runStateCommand(bridgeClient.selectMode(mode));
   }
 
   async function handleQualityChange(event: React.ChangeEvent<HTMLSelectElement>) {
@@ -265,9 +226,7 @@ function App() {
     if (!nextOption || nextOption.option.quality_label === selection?.quality) {
       return;
     }
-    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label), {
-      resetInspection: true,
-    });
+    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label));
   }
 
   async function handleFileFormatChange(event: React.ChangeEvent<HTMLSelectElement>) {
@@ -281,9 +240,7 @@ function App() {
     if (!nextOption || nextOption.option.quality_label === selection?.quality) {
       return;
     }
-    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label), {
-      resetInspection: true,
-    });
+    await runStateCommand(bridgeClient.selectQuality(nextOption.option.quality_label));
   }
 
   async function handleSelectItem(itemId: string) {
@@ -291,7 +248,6 @@ function App() {
       return;
     }
     await runStateCommand(bridgeClient.selectItem(itemId), {
-      resetInspection: true,
       trackBusy: false,
     });
   }
@@ -312,10 +268,6 @@ function App() {
         return;
       }
       applyStatePayload(response);
-      setInspection(null);
-      if (debugOpen) {
-        await loadRuntimeInfo();
-      }
     } catch (error) {
       if (isMountedRef.current) {
         setBridgeError(formatError(error));
@@ -343,10 +295,6 @@ function App() {
         return;
       }
       applyStatePayload(response);
-      setInspection(null);
-      if (debugOpen) {
-        await loadRuntimeInfo();
-      }
     } catch (error) {
       if (isMountedRef.current) {
         setBridgeError(formatError(error));
@@ -354,36 +302,6 @@ function App() {
     } finally {
       if (isMountedRef.current) {
         setMutationBusy(false);
-      }
-    }
-  }
-
-  async function handleInspectOutput() {
-    if (!selectedItem?.output_path || inspectionBusy || !shellReady) {
-      return;
-    }
-
-    setInspectionBusy(true);
-    try {
-      const response = await bridgeClient.inspectOutput(selectedItem.output_path);
-      if (!isMountedRef.current) {
-        return;
-      }
-      startTransition(() => {
-        setInspection(response);
-      });
-      if (!response.ok) {
-        setBridgeError(response.error?.message ?? "Output inspection failed.");
-        return;
-      }
-      setBridgeError("");
-    } catch (error) {
-      if (isMountedRef.current) {
-        setBridgeError(formatError(error));
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setInspectionBusy(false);
       }
     }
   }
@@ -421,9 +339,7 @@ function App() {
     if (clearQueueDisabled) {
       return;
     }
-    await runStateCommand(bridgeClient.clearQueue(), {
-      resetInspection: true,
-    });
+    await runStateCommand(bridgeClient.clearQueue());
   }
 
   const variantProps: VariantProps = {
@@ -511,23 +427,6 @@ function App() {
       <main className="workspace-host">
         <VariantC {...variantProps} />
       </main>
-
-      <DebugDrawer
-        actionBusy={inspectionBusy}
-        appState={appState}
-        bridgeMeta={bridgeMeta}
-        connectionState={connectionState}
-        debugEventCount={debugEventCount}
-        inspection={inspection}
-        lastStateSyncAt={lastStateSyncAt}
-        onInspectOutput={() => void handleInspectOutput()}
-        onRefreshRuntime={() => void loadRuntimeInfo()}
-        onRefreshState={() => void pollAppState(0)}
-        onToggle={() => setDebugOpen((current) => !current)}
-        open={debugOpen}
-        runtimeInfo={runtimeInfo}
-        selectedItem={selectedItem}
-      />
     </div>
   );
 }
