@@ -834,6 +834,13 @@ a {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .action-hint {
   font-size: 11.5px;
   color: var(--text-faint);
@@ -1454,6 +1461,15 @@ a {
   .action-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .action-buttons {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .action-buttons .btn {
+    width: 100%;
   }
 
   .toggle-group {

@@ -113,6 +113,14 @@ export function DebugDrawer({
               <dd>
                 {runtimeInfo?.bridge.command_model.mutations_blocked_while_downloading
                   ? "enabled"
+                  : "disabled"}
+              </dd>
+              <dt>Active jobs</dt>
+              <dd>
+                {runtimeInfo
+                  ? `${runtimeInfo.bridge.active_download_count} | ${
+                      runtimeInfo.bridge.active_download_item_ids.join(", ") || "none"
+                    }`
                   : "pending"}
               </dd>
               <dt>Shells</dt>

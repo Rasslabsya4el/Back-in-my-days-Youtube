@@ -21,8 +21,6 @@ export function VariantC(props: VariantProps) {
     queueSummary,
     currentMode,
   } = props;
-  const actionControlsDisabled =
-    controlsDisabled || queue.some((item) => item.status === "running");
 
   return (
     <div className="workspace variant-c">
@@ -107,13 +105,15 @@ export function VariantC(props: VariantProps) {
               <StatusSurface status={selectedStatus} variant="block" />
 
               <ActionBlock
-                controlsDisabled={actionControlsDisabled}
+                controlsDisabled={controlsDisabled}
                 currentMode={currentMode}
                 formatModel={props.formatModel}
                 onFileFormatChange={props.onFileFormatChange}
                 onModeChange={props.onModeChange}
                 onQualityChange={props.onQualityChange}
                 onStart={props.onStart}
+                onStartAll={props.onStartAll}
+                queuedItemCount={props.queuedItemCount}
                 selectedFormatOption={props.selectedFormatOption}
                 selectedItem={selectedItem}
               />

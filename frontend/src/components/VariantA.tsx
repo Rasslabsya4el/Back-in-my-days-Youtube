@@ -79,6 +79,8 @@ export function VariantA(props: VariantProps) {
                 onModeChange={props.onModeChange}
                 onQualityChange={props.onQualityChange}
                 onStart={props.onStart}
+                onStartAll={props.onStartAll}
+                queuedItemCount={props.queuedItemCount}
                 selectedFormatOption={props.selectedFormatOption}
                 selectedItem={selectedItem}
               />

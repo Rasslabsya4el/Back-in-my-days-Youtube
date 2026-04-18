@@ -81,7 +81,7 @@ After you paste a YouTube URL into the shell and add it to the queue, the bridge
 - output folder picker for the current app session
 - current item with `Quality` and `File format` selectors
 - queue selection
-- start download
+- start one item or `Download all queued`
 - status, error, and output path surface
 
 Runtime and inspection diagnostics stay behind an explicit debug toggle that is closed by default.
@@ -90,6 +90,8 @@ Runtime and inspection diagnostics stay behind an explicit debug toggle that is 
 - `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
 - `ffmpeg` merges or converts the media into a deterministic final file in `output/`
 - final output contract is `video -> .mp4`, `audio -> .m4a`
+
+The queue runtime is concurrent: multiple queued items can be started together, the bridge keeps separate worker threads per queue item, and the shell can show multiple `running` items at the same time. Output-path reservation happens before each run so two concurrent items with the same title do not overwrite each other.
 
 The orchestration and state mutations live in `app/controller/`. `app/shell.py` only binds controller state to Tkinter widgets, `frontend/` renders the first React shell iteration, and `app/bridge/` exposes the same controller via JSON-safe payloads for `pywebview` JS calls, so the backend stays reusable across both shells.
 
@@ -103,7 +105,7 @@ Application start creates:
 - `temp/`
 - `app/bin/` as the bundled tools lookup root
 
-The persisted queue state stores both the `queue` payload and top-level `selected_item_id`. Each saved queue item keeps its own `mode`, `quality`, `selected_format_id`, and persisted probe snapshot so the same selection can be restored after restart.
+The persisted queue state stores both the `queue` payload and top-level `selected_item_id`. Each saved queue item keeps its own `mode`, `quality`, `selected_format_id`, and persisted probe snapshot so the same selection can be restored after restart. If the app restarts after an interrupted concurrent run, transient `running` items are normalized back to `queued` instead of staying stuck in an impossible active state.
 
 ## Smoke checks
 
@@ -148,6 +150,14 @@ This smoke proves the bridge can:
 - call `get_runtime_info`, `get_app_state`, `add_url`, `select_item`, `select_mode`, `select_quality`, `start_download`, and `inspect_output`
 - operate without importing `app.shell` on the backend path
 
+Deterministic bridge concurrency smoke with proof artifact:
+
+```powershell
+poetry run python main.py --smoke-bridge-concurrency
+```
+
+This smoke starts two queued items through `start_all_downloads`, waits for a real overlap window with two `running` items at once, and writes the captured bridge/runtime snapshots to `runtime/ui-proof/TZ-PIPE-CONCURRENCY-01/bridge-concurrency-proof.json`.
+
 Bridge host startup smoke:
 
 ```powershell
@@ -182,6 +192,7 @@ The `pywebview` bridge exposes these Python methods for JS:
 - `select_quality`
 - `pick_output_dir`
 - `start_download`
+- `start_all_downloads`
 - `get_runtime_info`
 - `inspect_output`
 
@@ -189,7 +200,7 @@ The `pywebview` bridge exposes these Python methods for JS:
 
 The React shell keeps format internals inside the bridge/frontend layer. The user sees separate `Quality` and `File format` dropdowns, while the saved `selected_format_id` contract still drives the Python pipeline under the hood.
 
-`start_download` is async in the bridge layer: it returns an immediate acceptance payload, then the controller emits progress and status updates into the retained event queue while the background worker is running.
+`start_download` and `start_all_downloads` are async in the bridge layer: they return immediate acceptance payloads, then the controller emits progress and status updates into the retained event queue while background workers are running. Bridge meta/runtime payloads expose aggregate activity through `download_active`, `active_download_count`, and `active_download_item_ids`.
 
 The React shell intentionally stays coarse in its progress surface: it renders queue-item statuses and steps, not simulated byte progress that the backend does not expose yet.
 

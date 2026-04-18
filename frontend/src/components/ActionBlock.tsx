@@ -17,6 +17,8 @@ export function ActionBlock({
   onQualityChange,
   onFileFormatChange,
   onStart,
+  onStartAll,
+  queuedItemCount,
 }: {
   selectedItem: QueueItemSnapshot | null;
   currentMode: DownloadMode;
@@ -27,16 +29,21 @@ export function ActionBlock({
   onQualityChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onFileFormatChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onStart: () => void;
+  onStartAll: () => void;
+  queuedItemCount: number;
 }) {
   const finalFileFormatLabel =
     formatModel.fileFormatChoices[0]?.label ?? formatFinalFileFormat(currentMode);
   const qualityLabel =
     selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Pending";
   const primaryLabel = buildPrimaryActionLabel(selectedItem);
+  const startAllLabel =
+    queuedItemCount > 0 ? `Download all queued (${queuedItemCount})` : "Download all queued";
   const selectionSummary = `${formatModeLabel(currentMode)} / ${qualityLabel} / ${finalFileFormatLabel}`;
   const actionHint = selectedItem
     ? `Final output saves as ${finalFileFormatLabel}.`
     : "Select an item to configure the output.";
+  const selectedItemRunning = selectedItem?.status === "running";
 
   return (
     <div className="action-block">
@@ -56,7 +63,7 @@ export function ActionBlock({
               <button
                 key={mode}
                 className={`toggle-chip${currentMode === mode ? " active" : ""}`}
-                disabled={controlsDisabled || !selectedItem}
+                disabled={controlsDisabled || !selectedItem || selectedItemRunning}
                 onClick={() => onModeChange(mode)}
                 type="button"
               >
@@ -71,7 +78,7 @@ export function ActionBlock({
           {formatModel.qualityChoices.length > 1 ? (
             <select
               aria-label="Quality"
-              disabled={controlsDisabled || !selectedItem}
+              disabled={controlsDisabled || !selectedItem || selectedItemRunning}
               onChange={onQualityChange}
               value={selectedFormatOption?.qualityValue ?? ""}
             >
@@ -91,7 +98,7 @@ export function ActionBlock({
           {formatModel.fileFormatChoices.length > 1 ? (
             <select
               aria-label="Final file"
-              disabled={controlsDisabled || !selectedItem}
+              disabled={controlsDisabled || !selectedItem || selectedItemRunning}
               onChange={onFileFormatChange}
               value={selectedFormatOption?.fileFormatValue ?? ""}
             >
@@ -109,14 +116,24 @@ export function ActionBlock({
 
       <div className="action-footer">
         <span className="action-hint">{actionHint}</span>
-        <button
-          className="btn primary lg"
-          disabled={controlsDisabled || !selectedItem}
-          onClick={onStart}
-          type="button"
-        >
-          {primaryLabel}
-        </button>
+        <div className="action-buttons">
+          <button
+            className="btn"
+            disabled={controlsDisabled || queuedItemCount === 0}
+            onClick={onStartAll}
+            type="button"
+          >
+            {startAllLabel}
+          </button>
+          <button
+            className="btn primary lg"
+            disabled={controlsDisabled || !selectedItem || selectedItemRunning}
+            onClick={onStart}
+            type="button"
+          >
+            {primaryLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -79,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--smoke-bridge",
         metavar="URL",
         help="Run a headless JSON-safe bridge smoke without importing Tkinter.",
+    )
+    parser.add_argument(
+        "--smoke-bridge-concurrency",
+        action="store_true",
+        help="Run a deterministic bridge concurrency smoke and save proof artifacts under runtime/ui-proof.",
     )
     parser.add_argument(
         "--smoke-bridge-host",
@@ -372,6 +379,23 @@ class _BridgeSmokeDownloader:
     def __init__(self, output_dir: Path) -> None:
         self.output_dir = output_dir
 
+    def predict_output_path(
+        self,
+        item: QueueItem,
+        *,
+        output_dir: Path | None = None,
+        reserved_paths: list[Path] | tuple[Path, ...] | None = None,
+    ) -> Path:
+        target_dir = output_dir or self.output_dir
+        suffix = ".m4a" if item.mode == DownloadMode.AUDIO else ".mp4"
+        safe_title = self._sanitize_filename(item.title or item.source_url or item.id)
+        return self._resolve_output_collision(
+            target_dir=target_dir,
+            safe_title=safe_title,
+            suffix=suffix,
+            reserved_paths=reserved_paths,
+        )
+
     def execute(
         self,
         item: QueueItem,
@@ -413,6 +437,114 @@ class _BridgeSmokeDownloader:
             return None
         return {
             "format_name": "bridge-smoke",
+            "stream_types": ["video"],
+            "path": str(media_path),
+        }
+
+    @staticmethod
+    def _update_item(
+        item: QueueItem,
+        *,
+        status: JobStatus,
+        step: JobStep,
+        detail: str,
+        on_update: object | None,
+    ) -> None:
+        item.status = status
+        item.processing_step = step
+        item.status_detail = detail
+        item.touch()
+        if callable(on_update):
+            on_update(item)
+
+    @staticmethod
+    def _resolve_output_collision(
+        *,
+        target_dir: Path,
+        safe_title: str,
+        suffix: str,
+        reserved_paths: list[Path] | tuple[Path, ...] | None = None,
+    ) -> Path:
+        reserved = {
+            reserved_path.expanduser().resolve()
+            for reserved_path in (reserved_paths or ())
+        }
+        candidate = target_dir / f"{safe_title}{suffix}"
+        if not candidate.exists() and candidate.expanduser().resolve() not in reserved:
+            return candidate
+
+        collision_index = 2
+        while True:
+            candidate = target_dir / f"{safe_title} ({collision_index}){suffix}"
+            if not candidate.exists() and candidate.expanduser().resolve() not in reserved:
+                return candidate
+            collision_index += 1
+
+    @staticmethod
+    def _sanitize_filename(value: str) -> str:
+        collapsed = re.sub(r"\s+", " ", value).strip()
+        cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", collapsed)
+        cleaned = cleaned.rstrip(". ")
+        if not cleaned:
+            cleaned = "download"
+        return cleaned[:80]
+
+
+class _BridgeConcurrencySmokeDownloader(_BridgeSmokeDownloader):
+    def __init__(self, output_dir: Path, overlap_target: int = 2) -> None:
+        super().__init__(output_dir)
+        self._barrier = threading.Barrier(overlap_target, timeout=5)
+
+    def execute(
+        self,
+        item: QueueItem,
+        *,
+        on_update: object | None = None,
+        output_dir: Path | None = None,
+    ) -> Path:
+        target_dir = output_dir or self.output_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        output_path = Path(item.output_path) if item.output_path else target_dir / f"{item.id}.bridge-smoke.mp4"
+        self._update_item(
+            item,
+            status=JobStatus.RUNNING,
+            step=JobStep.PREPARING,
+            detail="bridge concurrency preparing",
+            on_update=on_update,
+        )
+        time.sleep(0.1)
+        self._update_item(
+            item,
+            status=JobStatus.RUNNING,
+            step=JobStep.DOWNLOADING,
+            detail="bridge concurrency overlap window",
+            on_update=on_update,
+        )
+        try:
+            self._barrier.wait()
+        except threading.BrokenBarrierError as error:
+            raise DownloadPipelineError(
+                JobStep.DOWNLOADING,
+                "Concurrency smoke did not reach a two-job overlap window.",
+            ) from error
+        time.sleep(0.35)
+        output_path.write_text(f"bridge concurrency artifact for {item.id}", encoding="utf-8")
+        item.output_path = str(output_path)
+        item.error_message = ""
+        self._update_item(
+            item,
+            status=JobStatus.COMPLETED,
+            step=JobStep.COMPLETED,
+            detail="bridge concurrency completed",
+            on_update=on_update,
+        )
+        return output_path
+
+    def inspect_output(self, media_path: Path) -> dict[str, object] | None:
+        if not media_path.exists():
+            return None
+        return {
+            "format_name": "bridge-concurrency-smoke",
             "stream_types": ["video"],
             "path": str(media_path),
         }
@@ -520,6 +652,151 @@ def run_smoke_bridge(url: str) -> None:
             ]
         )
     )
+
+
+def run_smoke_bridge_concurrency() -> int:
+    base_config = create_default_config()
+    proof_root = base_config.runtime_dir / "ui-proof" / "TZ-PIPE-CONCURRENCY-01"
+    shutil.rmtree(proof_root, ignore_errors=True)
+    output_dir = proof_root / "output"
+    temp_dir = proof_root / "temp"
+    state_file = proof_root / "queue_state.concurrency.smoke.json"
+    proof_root.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    config = AppConfig(
+        project_root=base_config.project_root,
+        runtime_dir=proof_root,
+        output_dir=output_dir,
+        temp_dir=temp_dir,
+        state_file=state_file,
+        bundled_tools_dir=base_config.bundled_tools_dir,
+    )
+    controller = AppController(
+        config,
+        downloader=_BridgeConcurrencySmokeDownloader(output_dir),
+    )
+
+    sample_probe = ProbeResult(
+        source_url="https://www.youtube.com/watch?v=BaW_jenozKc",
+        title="Concurrent smoke title",
+        channel="yt-dlp test suite",
+        thumbnail="https://i.ytimg.com/vi/BaW_jenozKc/hqdefault.jpg",
+        duration=10,
+        video_formats=[
+            FormatOption(
+                format_id="137",
+                quality_label="1080p | mp4 | video-only | fmt 137",
+                ext="mp4",
+                note="video-only",
+            )
+        ],
+        audio_formats=[
+            FormatOption(
+                format_id="140",
+                quality_label="128 kbps | m4a | audio-only | fmt 140",
+                ext="m4a",
+                note="audio-only",
+            )
+        ],
+    )
+    items = [
+        QueueItem(
+            source_url=f"{sample_probe.source_url}&concurrency={index}",
+            title=sample_probe.title,
+            mode=DownloadMode.VIDEO,
+            quality=sample_probe.video_formats[0].quality_label,
+            probe=sample_probe,
+            selected_format_id="137",
+        )
+        for index in range(2)
+    ]
+    controller.save_queue_state(items, selected_item_id=items[0].id)
+    bridge = AppBridgeApi(controller)
+
+    initial_state = bridge.get_app_state()
+    runtime_before = bridge.get_runtime_info()
+    start_payload = bridge.start_all_downloads()
+
+    overlap_payload: dict[str, object] | None = None
+    overlap_runtime: dict[str, object] | None = None
+    latest_payload = start_payload
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+        latest_payload = bridge.get_app_state({"since_event_id": latest_payload["meta"]["event_cursor"]})
+        current_state = latest_payload["data"].get("state") or {}
+        running_items = [
+            item for item in current_state.get("queue", []) if item.get("status") == JobStatus.RUNNING.value
+        ]
+        if (
+            len(running_items) >= 2
+            and latest_payload["meta"].get("active_download_count", 0) >= 2
+        ):
+            overlap_payload = latest_payload
+            overlap_runtime = bridge.get_runtime_info()
+            break
+
+    final_payload = latest_payload
+    while final_payload["meta"].get("download_active") and time.monotonic() < deadline:
+        time.sleep(0.05)
+        final_payload = bridge.get_app_state({"since_event_id": final_payload["meta"]["event_cursor"]})
+
+    final_state = final_payload["data"].get("state") or controller.get_state().to_dict()
+    output_paths = [str(item.get("output_path", "")) for item in final_state.get("queue", [])]
+    artifact_path = proof_root / "bridge-concurrency-proof.json"
+    artifact_payload = {
+        "task_id": "TZ-PIPE-CONCURRENCY-01",
+        "runtime_before": runtime_before,
+        "initial_state": initial_state,
+        "start_all_payload": start_payload,
+        "overlap_payload": overlap_payload,
+        "overlap_runtime": overlap_runtime,
+        "final_payload": final_payload,
+        "output_paths": output_paths,
+        "state_file": str(state_file),
+    }
+    artifact_path.write_text(
+        json.dumps(artifact_payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    overlap_running = 0
+    if overlap_payload is not None:
+        overlap_running = sum(
+            1
+            for item in (overlap_payload["data"].get("state") or {}).get("queue", [])
+            if item.get("status") == JobStatus.RUNNING.value
+        )
+
+    if overlap_running < 2:
+        print(
+            " ".join(
+                [
+                    "bridge_concurrency_smoke=error",
+                    f"artifact={str(artifact_path)!r}",
+                    f"overlap_running={overlap_running}",
+                    f"active_download_count={latest_payload['meta'].get('active_download_count', 0)}",
+                ]
+            )
+        )
+        return 1
+
+    unique_output_paths = {path for path in output_paths if path}
+    print(
+        " ".join(
+            [
+                "bridge_concurrency_smoke=ok",
+                f"artifact={str(artifact_path)!r}",
+                f"started={len(start_payload['data']['started_item_ids'])}",
+                f"overlap_running={overlap_running}",
+                f"active_download_count={overlap_runtime['data']['bridge']['active_download_count'] if overlap_runtime else 0}",
+                f"unique_outputs={len(unique_output_paths)}",
+            ]
+        )
+    )
+    return 0
 
 
 def _build_smoke_download_item(
@@ -646,6 +923,9 @@ def main() -> int:
     if args.smoke_bridge:
         run_smoke_bridge(args.smoke_bridge)
         return 0
+
+    if args.smoke_bridge_concurrency:
+        return run_smoke_bridge_concurrency()
 
     if args.smoke_bridge_host:
         try:

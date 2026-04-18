@@ -90,6 +90,9 @@ export interface BridgeMeta {
   api_version: string;
   event_cursor: number;
   download_active: boolean;
+  active_download_item_id: string;
+  active_download_count: number;
+  active_download_item_ids: string[];
   events_truncated?: boolean;
 }
 
@@ -119,6 +122,12 @@ export interface RuntimeBridgeInfo {
   api_version: string;
   download_active: boolean;
   active_download_item_id: string;
+  active_download_count: number;
+  active_download_item_ids: string[];
+  active_downloads: Array<{
+    item_id: string;
+    thread_name: string;
+  }>;
   update_model: {
     kind: string;
     state_method: string;
@@ -128,7 +137,9 @@ export interface RuntimeBridgeInfo {
   };
   command_model: {
     start_download_async: boolean;
+    start_all_downloads_async: boolean;
     mutations_blocked_while_downloading: boolean;
+    concurrent_downloads: boolean;
   };
   shells: {
     tkinter_fallback: boolean;
@@ -144,6 +155,12 @@ export interface RuntimeInfoPayload {
 export interface StartDownloadPayload extends AppStatePayload {
   accepted: boolean;
   item_id: string;
+}
+
+export interface StartAllDownloadsPayload extends AppStatePayload {
+  accepted: boolean;
+  started_item_ids: string[];
+  queued_item_ids: string[];
 }
 
 export interface ClipboardTextPayload {

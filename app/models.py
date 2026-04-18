@@ -37,6 +37,13 @@ class JobStep(StrEnum):
     FAILED = "failed"
 
 
+TRANSIENT_JOB_STEPS = {
+    JobStep.PREPARING,
+    JobStep.DOWNLOADING,
+    JobStep.POSTPROCESSING,
+}
+
+
 class ProbeErrorCode(StrEnum):
     INVALID = "invalid"
     PRIVATE = "private"
@@ -142,6 +149,21 @@ class QueueItem:
 
     def touch(self) -> None:
         self.updated_at = utc_now_iso()
+
+    def is_running(self) -> bool:
+        return self.status == JobStatus.RUNNING
+
+    def reset_transient_runtime_state(self) -> bool:
+        if not self.is_running() and self.processing_step not in TRANSIENT_JOB_STEPS:
+            return False
+
+        self.status = JobStatus.QUEUED
+        self.processing_step = JobStep.QUEUED
+        self.status_detail = "Restored from previous session. Ready to download again."
+        self.output_path = ""
+        self.error_message = ""
+        self.touch()
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -30,14 +30,12 @@ class AppBridgeApi:
     ) -> None:
         self.controller = controller
         self.max_events = max(1, max_events)
-        self._controller_lock = threading.Lock()
         self._event_lock = threading.Lock()
         self._download_lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
         self._event_cursor = 0
         self._latest_state: dict[str, Any] = {}
-        self._active_download_thread: threading.Thread | None = None
-        self._active_download_item_id = ""
+        self._active_downloads: dict[str, threading.Thread] = {}
         self.controller.subscribe(self._record_state_event)
         self._record_state_event(self.controller.get_state(), event_type="bootstrap")
 
@@ -71,12 +69,6 @@ class AppBridgeApi:
         )
 
     def add_url(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="Bridge mutations are blocked while a download is running.",
-            )
-
         try:
             url = self._read_required_string(payload, "url")
             state = self._call_controller(self.controller.add_url, url)
@@ -106,12 +98,6 @@ class AppBridgeApi:
         return self._state_response(state)
 
     def select_mode(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="Bridge mutations are blocked while a download is running.",
-            )
-
         try:
             mode = self._read_required_string(payload, "mode")
         except ValueError as error:
@@ -128,12 +114,6 @@ class AppBridgeApi:
         return self._state_response(state)
 
     def select_quality(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="Bridge mutations are blocked while a download is running.",
-            )
-
         try:
             quality = self._read_required_string(payload, "quality")
         except ValueError as error:
@@ -143,12 +123,6 @@ class AppBridgeApi:
 
     def pick_output_dir(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         del payload
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="Bridge mutations are blocked while a download is running.",
-            )
-
         current_output_dir = str(self._latest_state_copy().get("runtime", {}).get("output_dir", ""))
         try:
             selected_dir = self._open_output_dir_dialog(current_output_dir)
@@ -195,16 +169,11 @@ class AppBridgeApi:
         )
 
     def start_download(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="A download is already running. Poll get_app_state for progress updates.",
-            )
-
         try:
             item_id = self._read_optional_string(payload, "item_id")
         except ValueError as error:
             return self._error_response(code="invalid_request", message=str(error))
+
         state = self._latest_state_copy()
         selected_item_id = item_id or str(state.get("selected_item_id", ""))
         if not selected_item_id:
@@ -216,25 +185,18 @@ class AppBridgeApi:
                 },
             )
 
-        if selected_item_id not in {str(item.get("id", "")) for item in state.get("queue", [])}:
+        queue_ids = {str(item.get("id", "")) for item in state.get("queue", [])}
+        if selected_item_id not in queue_ids:
             return self._error_response(
                 code="unknown_item",
                 message=f"Queue item {selected_item_id!r} is not available in the current bridge state.",
             )
+        if not self._spawn_download_job(selected_item_id):
+            return self._error_response(
+                code="download_in_progress",
+                message=f"Queue item {selected_item_id!r} is already running.",
+            )
 
-        if item_id and selected_item_id != str(state.get("selected_item_id", "")):
-            self._call_controller(self.controller.select_item, selected_item_id)
-
-        worker = threading.Thread(
-            target=self._run_download,
-            kwargs={"item_id": selected_item_id},
-            name=f"bridge-download-{selected_item_id}",
-            daemon=True,
-        )
-        with self._download_lock:
-            self._active_download_thread = worker
-            self._active_download_item_id = selected_item_id
-        worker.start()
         return self._response(
             data={
                 "accepted": True,
@@ -243,16 +205,51 @@ class AppBridgeApi:
             },
         )
 
+    def start_all_downloads(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
+        state = self._latest_state_copy()
+        queued_item_ids = [
+            str(item.get("id", ""))
+            for item in state.get("queue", [])
+            if str(item.get("status", "")) == "queued"
+        ]
+        if not queued_item_ids:
+            return self._response(
+                data={
+                    "accepted": False,
+                    "started_item_ids": [],
+                    "queued_item_ids": [],
+                    "state": state,
+                }
+            )
+
+        started_item_ids = [
+            item_id for item_id in queued_item_ids if item_id and self._spawn_download_job(item_id)
+        ]
+        return self._response(
+            data={
+                "accepted": bool(started_item_ids),
+                "started_item_ids": started_item_ids,
+                "queued_item_ids": queued_item_ids,
+                "state": self._latest_state_copy(),
+            }
+        )
+
     def get_runtime_info(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         del payload
         state = self._latest_state_copy()
+        active_download_item_ids = self._active_download_item_ids_copy()
+        active_downloads = self._active_downloads_copy()
         return self._response(
             data={
                 "runtime": deepcopy(state.get("runtime", {})),
                 "bridge": {
                     "api_version": BRIDGE_API_VERSION,
-                    "download_active": self._download_is_active(),
-                    "active_download_item_id": self._active_download_item_id_copy(),
+                    "download_active": bool(active_download_item_ids),
+                    "active_download_item_id": active_download_item_ids[0] if active_download_item_ids else "",
+                    "active_download_count": len(active_download_item_ids),
+                    "active_download_item_ids": active_download_item_ids,
+                    "active_downloads": active_downloads,
                     "update_model": {
                         "kind": "polling",
                         "state_method": "get_app_state",
@@ -262,7 +259,9 @@ class AppBridgeApi:
                     },
                     "command_model": {
                         "start_download_async": True,
-                        "mutations_blocked_while_downloading": True,
+                        "start_all_downloads_async": True,
+                        "mutations_blocked_while_downloading": False,
+                        "concurrent_downloads": True,
                     },
                     "shells": {
                         "tkinter_fallback": True,
@@ -317,12 +316,27 @@ class AppBridgeApi:
             return
         finally:
             with self._download_lock:
-                self._active_download_thread = None
-                self._active_download_item_id = ""
+                self._cleanup_finished_downloads_locked()
+                self._active_downloads.pop(item_id, None)
+
+    def _spawn_download_job(self, item_id: str) -> bool:
+        worker = threading.Thread(
+            target=self._run_download,
+            kwargs={"item_id": item_id},
+            name=f"bridge-download-{item_id}",
+            daemon=True,
+        )
+        with self._download_lock:
+            self._cleanup_finished_downloads_locked()
+            existing_worker = self._active_downloads.get(item_id)
+            if existing_worker is not None and existing_worker.is_alive():
+                return False
+            self._active_downloads[item_id] = worker
+        worker.start()
+        return True
 
     def _call_controller(self, callback: Any, *args: Any) -> Any:
-        with self._controller_lock:
-            return callback(*args)
+        return callback(*args)
 
     def _record_state_event(self, state: AppState, event_type: str = "state_changed") -> None:
         payload = state.to_dict()
@@ -348,10 +362,14 @@ class AppBridgeApi:
         data: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        active_download_item_ids = self._active_download_item_ids_copy()
         response_meta = {
             "api_version": BRIDGE_API_VERSION,
             "event_cursor": self._current_event_cursor(),
-            "download_active": self._download_is_active(),
+            "download_active": bool(active_download_item_ids),
+            "active_download_item_id": active_download_item_ids[0] if active_download_item_ids else "",
+            "active_download_count": len(active_download_item_ids),
+            "active_download_item_ids": active_download_item_ids,
         }
         if meta:
             response_meta.update(meta)
@@ -363,6 +381,7 @@ class AppBridgeApi:
         }
 
     def _error_response(self, *, code: str, message: str) -> dict[str, Any]:
+        active_download_item_ids = self._active_download_item_ids_copy()
         return {
             "ok": False,
             "data": {},
@@ -373,7 +392,10 @@ class AppBridgeApi:
             "meta": {
                 "api_version": BRIDGE_API_VERSION,
                 "event_cursor": self._current_event_cursor(),
-                "download_active": self._download_is_active(),
+                "download_active": bool(active_download_item_ids),
+                "active_download_item_id": active_download_item_ids[0] if active_download_item_ids else "",
+                "active_download_count": len(active_download_item_ids),
+                "active_download_item_ids": active_download_item_ids,
             },
         }
 
@@ -392,13 +414,28 @@ class AppBridgeApi:
             return ""
         return str(selected_item.get("output_path", ""))
 
-    def _download_is_active(self) -> bool:
+    def _active_download_item_ids_copy(self) -> list[str]:
         with self._download_lock:
-            return self._active_download_thread is not None and self._active_download_thread.is_alive()
+            self._cleanup_finished_downloads_locked()
+            return list(self._active_downloads.keys())
 
-    def _active_download_item_id_copy(self) -> str:
+    def _active_downloads_copy(self) -> list[dict[str, str]]:
         with self._download_lock:
-            return self._active_download_item_id
+            self._cleanup_finished_downloads_locked()
+            return [
+                {
+                    "item_id": item_id,
+                    "thread_name": worker.name,
+                }
+                for item_id, worker in self._active_downloads.items()
+            ]
+
+    def _cleanup_finished_downloads_locked(self) -> None:
+        finished_item_ids = [
+            item_id for item_id, worker in self._active_downloads.items() if not worker.is_alive()
+        ]
+        for item_id in finished_item_ids:
+            self._active_downloads.pop(item_id, None)
 
     @staticmethod
     def _read_required_string(payload: dict[str, Any] | str | None, field_name: str) -> str:

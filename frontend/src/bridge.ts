@@ -4,6 +4,7 @@ import type {
   GetAppStatePayload,
   InspectOutputPayload,
   RuntimeInfoPayload,
+  StartAllDownloadsPayload,
   StartDownloadPayload,
 } from "./types";
 
@@ -20,6 +21,7 @@ type BridgeMethodName =
   | "pick_output_dir"
   | "open_output_dir"
   | "start_download"
+  | "start_all_downloads"
   | "get_runtime_info"
   | "inspect_output";
 
@@ -33,6 +35,7 @@ export interface AppBridgeApiSurface {
   pick_output_dir(): Promise<unknown>;
   open_output_dir(): Promise<unknown>;
   start_download(payload?: { item_id?: string } | string): Promise<unknown>;
+  start_all_downloads(): Promise<unknown>;
   get_runtime_info(): Promise<unknown>;
   inspect_output(payload?: { output_path?: string } | string): Promise<unknown>;
 }
@@ -86,6 +89,10 @@ class BridgeClient {
       "start_download",
       itemId ? { item_id: itemId } : undefined,
     );
+  }
+
+  startAllDownloads() {
+    return this.call<StartAllDownloadsPayload>("start_all_downloads");
   }
 
   getRuntimeInfo() {

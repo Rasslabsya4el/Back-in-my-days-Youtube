@@ -66,10 +66,10 @@ function App() {
   const selectedFormatOption = formatModel.activeOption;
   const outputDir = appState?.runtime.output_dir ?? "";
   const progress = summarizeQueue(queue);
-  const bridgeBusy = bridgeMeta?.download_active ?? false;
+  const queuedItemCount = queue.filter((item) => item.status === "queued").length;
   const shellReady = connectionState === "ready";
   const controlsDisabled = actionBusy || !shellReady;
-  const commandDisabled = actionBusy || bridgeBusy || !shellReady;
+  const commandDisabled = actionBusy || !shellReady;
   const pasteDisabled = !shellReady;
   const openOutputDisabled = actionBusy || !shellReady || !outputDir;
   const selectedStatus = buildUnifiedStatus(selectedItem, bridgeError);
@@ -299,7 +299,7 @@ function App() {
   }
 
   async function handleStartDownload() {
-    if (!selectedItem || commandDisabled) {
+    if (!selectedItem || commandDisabled || selectedItem.status === "running") {
       return;
     }
 
@@ -311,6 +311,37 @@ function App() {
       }
       if (!response.ok) {
         setBridgeError(response.error?.message ?? "Download start failed.");
+        return;
+      }
+      applyStatePayload(response);
+      setInspection(null);
+      if (debugOpen) {
+        await loadRuntimeInfo();
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        setBridgeError(formatError(error));
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setActionBusy(false);
+      }
+    }
+  }
+
+  async function handleStartAllDownloads() {
+    if (!queuedItemCount || commandDisabled) {
+      return;
+    }
+
+    setActionBusy(true);
+    try {
+      const response = await bridgeClient.startAllDownloads();
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (!response.ok) {
+        setBridgeError(response.error?.message ?? "Queue start failed.");
         return;
       }
       applyStatePayload(response);
@@ -427,6 +458,8 @@ function App() {
     onQualityChange: (event) => void handleQualityChange(event),
     onFileFormatChange: (event) => void handleFileFormatChange(event),
     onStart: () => void handleStartDownload(),
+    onStartAll: () => void handleStartAllDownloads(),
+    queuedItemCount,
     selectedStatus,
     buildItemStatus: (item) => buildUnifiedStatus(item, ""),
     queueSummary: formatQueueSummary(progress),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -144,6 +145,24 @@ class QueueItemDownloader:
     def inspect_output(self, media_path: Path) -> dict[str, object] | None:
         return self._build_postprocessor().inspect_output(media_path)
 
+    def predict_output_path(
+        self,
+        item: QueueItem,
+        *,
+        output_dir: Path | None = None,
+        reserved_paths: Collection[Path] | None = None,
+    ) -> Path:
+        suffix = ".m4a" if item.mode == DownloadMode.AUDIO else ".mp4"
+        title = item.title or (item.probe.title if item.probe else "") or item.source_url
+        safe_title = self._sanitize_filename(title)
+        target_dir = output_dir or self.config.output_dir
+        return self._resolve_output_collision(
+            target_dir=target_dir,
+            safe_title=safe_title,
+            suffix=suffix,
+            reserved_paths=reserved_paths,
+        )
+
     def _build_plan(self, item: QueueItem, *, output_dir: Path | None = None) -> DownloadPlan:
         if not item.probe:
             raise DownloadPipelineError(
@@ -157,7 +176,7 @@ class QueueItemDownloader:
             )
 
         item.title = item.title or item.probe.title
-        output_path = self._predict_output_path(item, output_dir=output_dir)
+        output_path = self._resolve_requested_output_path(item, output_dir=output_dir)
         format_ids = [part.strip() for part in item.selected_format_id.split("+") if part.strip()]
         if not format_ids:
             raise DownloadPipelineError(
@@ -422,27 +441,34 @@ class QueueItemDownloader:
                 return option
         return None
 
-    def _predict_output_path(self, item: QueueItem, *, output_dir: Path | None = None) -> Path:
-        suffix = ".m4a" if item.mode == DownloadMode.AUDIO else ".mp4"
-        title = item.title or (item.probe.title if item.probe else "") or item.source_url
-        safe_title = self._sanitize_filename(title)
-        target_dir = output_dir or self.config.output_dir
-        return self._resolve_output_collision(
-            target_dir=target_dir,
-            safe_title=safe_title,
-            suffix=suffix,
-        )
+    def _resolve_requested_output_path(self, item: QueueItem, *, output_dir: Path | None = None) -> Path:
+        if item.output_path:
+            requested_path = Path(item.output_path).expanduser()
+            if not requested_path.is_absolute():
+                requested_path = (output_dir or self.config.output_dir) / requested_path
+            return requested_path.resolve()
+        return self.predict_output_path(item, output_dir=output_dir)
 
     @staticmethod
-    def _resolve_output_collision(*, target_dir: Path, safe_title: str, suffix: str) -> Path:
+    def _resolve_output_collision(
+        *,
+        target_dir: Path,
+        safe_title: str,
+        suffix: str,
+        reserved_paths: Collection[Path] | None = None,
+    ) -> Path:
+        reserved = {
+            reserved_path.expanduser().resolve()
+            for reserved_path in (reserved_paths or ())
+        }
         candidate = target_dir / f"{safe_title}{suffix}"
-        if not candidate.exists():
+        if not candidate.exists() and candidate.expanduser().resolve() not in reserved:
             return candidate
 
         collision_index = 2
         while True:
             candidate = target_dir / f"{safe_title} ({collision_index}){suffix}"
-            if not candidate.exists():
+            if not candidate.exists() and candidate.expanduser().resolve() not in reserved:
                 return candidate
             collision_index += 1
 

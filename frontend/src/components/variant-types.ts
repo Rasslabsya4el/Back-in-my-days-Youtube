@@ -21,6 +21,8 @@ export type VariantProps = {
   onQualityChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onFileFormatChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onStart: () => void;
+  onStartAll: () => void;
+  queuedItemCount: number;
   selectedStatus: UnifiedStatus;
   buildItemStatus: (item: QueueItemSnapshot) => UnifiedStatus;
   queueSummary: string;
