@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.config import AppConfig, create_default_config
 from app.controller import AppController
-from app.core.audio_metadata import AUDIO_ARTWORK_TARGET_SIZE, build_audio_artwork_cover_filter
 from app.models import DownloadMode
 
 
@@ -35,14 +34,14 @@ SUMMARY_PATH = PROOF_DIR / "artwork-harness-summary.json"
 PREVIOUS_INSPECT_PATH = PROOF_DIR / "inspect-previous-audio.json"
 CURRENT_INSPECT_PATH = PROOF_DIR / "inspect-current-audio.json"
 CURRENT_FFPROBE_PATH = PROOF_DIR / "ffprobe-current-audio.json"
+PREVIOUS_THUMB_FFPROBE_PATH = PROOF_DIR / "ffprobe-previous-thumbnail.json"
+CURRENT_THUMB_FFPROBE_PATH = PROOF_DIR / "ffprobe-current-thumbnail.json"
 PREVIOUS_STATE_PATH = PROOF_DIR / "state-after-previous-download.json"
 AFTER_CLEAR_STATE_PATH = PROOF_DIR / "state-after-clear.json"
 CURRENT_STATE_PATH = PROOF_DIR / "state-after-current-download.json"
 EXTRACTED_ARTWORK_PATH = PROOF_DIR / "extracted-attached-pic.jpg"
 CURRENT_THUMB_PATH = PROOF_DIR / "current-thumbnail.jpg"
 PREVIOUS_THUMB_PATH = PROOF_DIR / "previous-thumbnail.jpg"
-CURRENT_EXPECTED_ARTWORK_PATH = PROOF_DIR / "current-thumbnail-square-cover.jpg"
-PREVIOUS_EXPECTED_ARTWORK_PATH = PROOF_DIR / "previous-thumbnail-square-cover.jpg"
 
 
 class HarnessError(RuntimeError):
@@ -192,34 +191,6 @@ def extract_attached_artwork(
     )
 
 
-def build_expected_square_artwork(
-    source_path: Path,
-    ffmpeg_path: Path,
-    output_path: Path,
-) -> dict[str, Any]:
-    command_payload = run_command(
-        [
-            str(ffmpeg_path),
-            "-y",
-            "-v",
-            "error",
-            "-i",
-            str(source_path),
-            "-vf",
-            build_audio_artwork_cover_filter(),
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            str(output_path),
-        ],
-        timeout=120,
-    )
-    if not output_path.exists() or output_path.stat().st_size <= 0:
-        raise HarnessError(f"Expected square artwork derivative is missing: {output_path}")
-    return command_payload
-
-
 def render_normalized_gray(image_path: Path, ffmpeg_path: Path, *, size: int) -> bytes:
     result = subprocess.run(
         [
@@ -316,6 +287,18 @@ def find_attached_pic_stream(ffprobe_payload: dict[str, Any]) -> dict[str, Any] 
             continue
         disposition = stream.get("disposition")
         if isinstance(disposition, dict) and bool(disposition.get("attached_pic")):
+            return stream
+    return None
+
+
+def find_primary_visual_stream(ffprobe_payload: dict[str, Any]) -> dict[str, Any] | None:
+    streams = ffprobe_payload.get("streams", [])
+    if not isinstance(streams, list):
+        return None
+    for stream in streams:
+        if not isinstance(stream, dict):
+            continue
+        if str(stream.get("codec_type") or "") == "video":
             return stream
     return None
 
@@ -417,27 +400,39 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
             raise HarnessError("Missing previous or current thumbnail URL in probe data.")
         download_file(previous_thumbnail_url, PREVIOUS_THUMB_PATH)
         download_file(current_thumbnail_url, CURRENT_THUMB_PATH)
-        summary["commands"].append(
-            build_expected_square_artwork(
-                PREVIOUS_THUMB_PATH,
-                ffmpeg_resolution.path,
-                PREVIOUS_EXPECTED_ARTWORK_PATH,
-            )
+        previous_thumbnail_ffprobe, previous_thumbnail_ffprobe_command = run_ffprobe(
+            ffprobe_resolution.path,
+            PREVIOUS_THUMB_PATH,
+            PREVIOUS_THUMB_FFPROBE_PATH,
         )
-        summary["commands"].append(
-            build_expected_square_artwork(
-                CURRENT_THUMB_PATH,
-                ffmpeg_resolution.path,
-                CURRENT_EXPECTED_ARTWORK_PATH,
-            )
+        summary["commands"].append(previous_thumbnail_ffprobe_command)
+        current_thumbnail_ffprobe, current_thumbnail_ffprobe_command = run_ffprobe(
+            ffprobe_resolution.path,
+            CURRENT_THUMB_PATH,
+            CURRENT_THUMB_FFPROBE_PATH,
         )
+        summary["commands"].append(current_thumbnail_ffprobe_command)
 
         current_attached_pic_stream = find_attached_pic_stream(ffprobe_payload)
+        current_thumbnail_stream = find_primary_visual_stream(current_thumbnail_ffprobe)
+        previous_thumbnail_stream = find_primary_visual_stream(previous_thumbnail_ffprobe)
         current_attached_pic_width = parse_optional_int(
             current_attached_pic_stream.get("width") if current_attached_pic_stream else None
         )
         current_attached_pic_height = parse_optional_int(
             current_attached_pic_stream.get("height") if current_attached_pic_stream else None
+        )
+        current_thumbnail_width = parse_optional_int(
+            current_thumbnail_stream.get("width") if current_thumbnail_stream else None
+        )
+        current_thumbnail_height = parse_optional_int(
+            current_thumbnail_stream.get("height") if current_thumbnail_stream else None
+        )
+        previous_thumbnail_width = parse_optional_int(
+            previous_thumbnail_stream.get("width") if previous_thumbnail_stream else None
+        )
+        previous_thumbnail_height = parse_optional_int(
+            previous_thumbnail_stream.get("height") if previous_thumbnail_stream else None
         )
         embedded_artwork_stream_exists = (
             bool(current_inspection.get("has_attached_pic")) and current_attached_pic_stream is not None
@@ -447,6 +442,20 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
             and current_attached_pic_width is not None
             and current_attached_pic_height is not None
             and current_attached_pic_width == current_attached_pic_height
+        )
+        current_source_artwork_is_square = (
+            current_thumbnail_width is not None
+            and current_thumbnail_height is not None
+            and current_thumbnail_width == current_thumbnail_height
+        )
+        embedded_artwork_dimensions_match_current_source = (
+            embedded_artwork_stream_exists
+            and current_attached_pic_width is not None
+            and current_attached_pic_height is not None
+            and current_thumbnail_width is not None
+            and current_thumbnail_height is not None
+            and current_attached_pic_width == current_thumbnail_width
+            and current_attached_pic_height == current_thumbnail_height
         )
 
         embedded_artwork_missing = not (
@@ -465,8 +474,8 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
 
         if not embedded_artwork_missing:
             extracted_signature = build_image_signature(EXTRACTED_ARTWORK_PATH, ffmpeg_resolution.path)
-            current_signature = build_image_signature(CURRENT_EXPECTED_ARTWORK_PATH, ffmpeg_resolution.path)
-            previous_signature = build_image_signature(PREVIOUS_EXPECTED_ARTWORK_PATH, ffmpeg_resolution.path)
+            current_signature = build_image_signature(CURRENT_THUMB_PATH, ffmpeg_resolution.path)
+            previous_signature = build_image_signature(PREVIOUS_THUMB_PATH, ffmpeg_resolution.path)
             extracted_signature_payload = extracted_signature.to_dict()
             current_signature_payload = current_signature.to_dict()
             previous_signature_payload = previous_signature.to_dict()
@@ -485,7 +494,7 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
             and cleanup_green
             and embedded_artwork_stream_exists
             and not embedded_artwork_missing
-            and embedded_artwork_is_square
+            and embedded_artwork_dimensions_match_current_source
             and embedded_artwork_matches_current
             and not embedded_artwork_matches_previous
         )
@@ -503,7 +512,7 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
             if (
                 not embedded_artwork_stream_exists
                 or embedded_artwork_missing
-                or not embedded_artwork_is_square
+                or not embedded_artwork_dimensions_match_current_source
                 or embedded_artwork_matches_previous
                 or not embedded_artwork_matches_current
             ):
@@ -518,19 +527,34 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
                 "previous_audio_inspection": previous_inspection,
                 "current_audio_inspection": current_inspection,
                 "current_audio_ffprobe": ffprobe_payload,
-                "audio_artwork_target_size": AUDIO_ARTWORK_TARGET_SIZE,
+                "audio_artwork_contract": "full_original_downloaded_artwork",
+                "attached_pic_can_be_nonsquare": True,
                 "previous_thumbnail_path": str(PREVIOUS_THUMB_PATH),
                 "current_thumbnail_path": str(CURRENT_THUMB_PATH),
-                "previous_expected_artwork_path": str(PREVIOUS_EXPECTED_ARTWORK_PATH),
-                "current_expected_artwork_path": str(CURRENT_EXPECTED_ARTWORK_PATH),
+                "previous_reference_artwork_path": str(PREVIOUS_THUMB_PATH),
+                "current_reference_artwork_path": str(CURRENT_THUMB_PATH),
+                "previous_thumbnail_ffprobe": previous_thumbnail_ffprobe,
+                "current_thumbnail_ffprobe": current_thumbnail_ffprobe,
                 "extracted_artwork_path": str(EXTRACTED_ARTWORK_PATH),
                 "embedded_artwork_stream_exists": embedded_artwork_stream_exists,
                 "embedded_artwork_is_square": embedded_artwork_is_square,
+                "current_source_artwork_is_square": current_source_artwork_is_square,
                 "embedded_artwork_dimensions": {
                     "width": current_attached_pic_width,
                     "height": current_attached_pic_height,
                 },
+                "current_source_artwork_dimensions": {
+                    "width": current_thumbnail_width,
+                    "height": current_thumbnail_height,
+                },
+                "previous_source_artwork_dimensions": {
+                    "width": previous_thumbnail_width,
+                    "height": previous_thumbnail_height,
+                },
                 "embedded_artwork_stream": current_attached_pic_stream,
+                "embedded_artwork_dimensions_match_current_source": (
+                    embedded_artwork_dimensions_match_current_source
+                ),
                 "queue_reset_flow_green": queue_reset_flow_green,
                 "queue_reset_after_clear": {
                     "queue_count": len(cleared_state.queue),
@@ -547,8 +571,8 @@ def run_harness(*, previous_url: str, current_url: str) -> int:
                 },
                 "image_signatures": {
                     "extracted_artwork": extracted_signature_payload,
-                    "current_expected_artwork": current_signature_payload,
-                    "previous_expected_artwork": previous_signature_payload,
+                    "current_reference_artwork": current_signature_payload,
+                    "previous_reference_artwork": previous_signature_payload,
                 },
                 "image_compare": {
                     "current": current_compare,

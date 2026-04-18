@@ -8,7 +8,6 @@ from typing import Any, Callable
 from ..ffmpeg import BinaryResolution
 from .audio_metadata import (
     AudioMetadata,
-    build_audio_artwork_cover_filter,
     download_artwork,
 )
 from .stage_scheduler import DownloadStageScheduler
@@ -115,17 +114,13 @@ class MediaPostProcessor:
         self._remove_if_exists(output_path)
         staged_output = output_path.parent / f"{output_path.stem}.staged{output_path.suffix}"
         raw_artwork_input = download_artwork(metadata.artwork_url, working_dir=working_dir)
-        artwork_input = self._prepare_audio_artwork(
-            artwork_input=raw_artwork_input,
-            working_dir=working_dir,
-        )
         self._remove_if_exists(staged_output)
         try:
             self._finalize_audio_variant(
                 audio_input=audio_input,
                 output_path=staged_output,
                 metadata=metadata,
-                artwork_input=artwork_input,
+                artwork_input=raw_artwork_input,
                 copy_audio=True,
             )
         except MediaPostprocessError:
@@ -134,7 +129,7 @@ class MediaPostProcessor:
                 audio_input=audio_input,
                 output_path=staged_output,
                 metadata=metadata,
-                artwork_input=artwork_input,
+                artwork_input=raw_artwork_input,
                 copy_audio=False,
             )
 
@@ -143,8 +138,8 @@ class MediaPostProcessor:
             staged_output.replace(output_path)
         finally:
             self._remove_if_exists(staged_output)
-            for cleanup_path in {path for path in (raw_artwork_input, artwork_input) if path is not None}:
-                self._remove_if_exists(cleanup_path)
+            if raw_artwork_input is not None:
+                self._remove_if_exists(raw_artwork_input)
 
         self._validate_output(output_path, "m4a")
         return output_path
@@ -285,44 +280,6 @@ class MediaPostProcessor:
                 description="transcode video to mp4",
                 arguments=arguments,
             )
-
-    def _prepare_audio_artwork(
-        self,
-        *,
-        artwork_input: Path | None,
-        working_dir: Path,
-    ) -> Path | None:
-        if artwork_input is None or self.ffmpeg.path is None:
-            return artwork_input
-
-        square_artwork_path = working_dir / "artwork.square.jpg"
-        self._remove_if_exists(square_artwork_path)
-        try:
-            self._run_ffmpeg(
-                description="prepare square audio artwork",
-                arguments=[
-                    "-i",
-                    str(artwork_input),
-                    "-vf",
-                    build_audio_artwork_cover_filter(),
-                    "-frames:v",
-                    "1",
-                    "-q:v",
-                    "2",
-                    str(square_artwork_path),
-                ],
-            )
-        except MediaPostprocessError:
-            self._remove_if_exists(square_artwork_path)
-            return None
-
-        try:
-            if square_artwork_path.stat().st_size <= 0:
-                raise OSError("square artwork is empty")
-        except OSError:
-            self._remove_if_exists(square_artwork_path)
-            return None
-        return square_artwork_path
 
     @staticmethod
     def _audio_arguments(
