@@ -92,6 +92,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Start the pywebview bridge host and auto-close it after a short startup probe.",
     )
+    parser.add_argument(
+        "--smoke-artwork-harness",
+        action="store_true",
+        help="Run the exact old-item -> Clear queue -> new audio artwork proof harness.",
+    )
+    parser.add_argument(
+        "--smoke-artwork-previous-url",
+        help="Optional previous URL override for --smoke-artwork-harness.",
+    )
+    parser.add_argument(
+        "--smoke-artwork-current-url",
+        help="Optional current URL override for --smoke-artwork-harness.",
+    )
     return parser
 
 
@@ -933,6 +946,16 @@ def main() -> int:
         except BridgeHostError as error:
             return _bridge_host_blocked(error)
         return 0
+
+    if args.smoke_artwork_harness:
+        from scripts.validation.artwork_queue_reset_harness import run_harness
+
+        return run_harness(
+            previous_url=args.smoke_artwork_previous_url
+            or "https://www.youtube.com/watch?v=Lm7-yFZ5fZQ",
+            current_url=args.smoke_artwork_current_url
+            or "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        )
 
     if args.ui_shell == "bridge":
         try:
