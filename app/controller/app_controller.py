@@ -237,15 +237,14 @@ class AppController:
             )
         except DownloadPipelineError:
             self._status_message = item.error_message or "Download failed."
-            self.save_queue_state(selected_item_id=item.id)
+            self.save_queue_state(selected_item_id=self._selected_item_id_or(item.id))
             raise
 
         self._status_message = f"Download finished. Saved to {output_path.name}."
-        return self.save_queue_state(selected_item_id=item.id)
+        return self.save_queue_state(selected_item_id=self._selected_item_id_or(item.id))
 
     def _handle_pipeline_update(self, item: QueueItem) -> None:
-        self._selected_item_id = item.id
-        self.save_queue_state(selected_item_id=item.id)
+        self.save_queue_state(selected_item_id=self._selected_item_id_or(item.id))
 
     def _build_state(self) -> AppState:
         selected_item = self._selected_item()
@@ -397,6 +396,9 @@ class AppController:
             if item.id == item_id:
                 return item
         return None
+
+    def _selected_item_id_or(self, fallback_item_id: str) -> str:
+        return self._selected_item_id if self._find_item(self._selected_item_id) is not None else fallback_item_id
 
     def _emit_state(self) -> AppState:
         state = self._build_state()

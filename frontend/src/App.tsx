@@ -49,8 +49,8 @@ function App() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEventCount, setDebugEventCount] = useState(0);
   const [lastStateSyncAt, setLastStateSyncAt] = useState("");
-  const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
-  const [compareMode, setCompareMode] = useCompareMode();
+  const [loadedThumbnailSrc, setLoadedThumbnailSrc] = useState("");
+  const [compareMode] = useCompareMode();
 
   const isMountedRef = useRef(true);
   const cursorRef = useRef(0);
@@ -67,12 +67,19 @@ function App() {
   const outputDir = appState?.runtime.output_dir ?? "";
   const progress = summarizeQueue(queue);
   const bridgeBusy = bridgeMeta?.download_active ?? false;
-  const controlsDisabled = actionBusy || bridgeBusy || connectionState !== "ready";
+  const shellReady = connectionState === "ready";
+  const controlsDisabled = actionBusy || !shellReady;
+  const commandDisabled = actionBusy || bridgeBusy || !shellReady;
+  const pasteDisabled = !shellReady;
+  const openOutputDisabled = actionBusy || !shellReady || !outputDir;
   const selectedStatus = buildUnifiedStatus(selectedItem, bridgeError);
+  const selectedThumbnailSrc = selectedItem?.probe?.thumbnail ?? "";
+  const thumbnailLoaded =
+    Boolean(selectedThumbnailSrc) && loadedThumbnailSrc === selectedThumbnailSrc;
 
   useEffect(() => {
-    setThumbnailLoaded(false);
-  }, [selectedItem?.id, selectedItem?.probe?.thumbnail]);
+    setLoadedThumbnailSrc("");
+  }, [selectedItem?.id, selectedThumbnailSrc]);
 
   const applyStatePayload = useEffectEvent(
     (response: BridgeResponse<GetAppStatePayload> | BridgeResponse<{ state: AppState }>) => {
@@ -233,7 +240,7 @@ function App() {
   async function handleAddUrl(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalized = urlInput.trim();
-    if (!normalized) {
+    if (!normalized || commandDisabled) {
       return;
     }
     await runStateCommand(bridgeClient.addUrl(normalized), {
@@ -243,13 +250,16 @@ function App() {
   }
 
   async function handleModeChange(mode: DownloadMode) {
-    if (mode === selection?.mode) {
+    if (mode === selection?.mode || commandDisabled) {
       return;
     }
     await runStateCommand(bridgeClient.selectMode(mode), { resetInspection: true });
   }
 
   async function handleQualityChange(event: React.ChangeEvent<HTMLSelectElement>) {
+    if (commandDisabled) {
+      return;
+    }
     const nextOption = pickFriendlyFormatOption(formatModel.options, {
       fileFormatValue: selectedFormatOption?.fileFormatValue ?? "",
       qualityValue: event.target.value,
@@ -263,6 +273,9 @@ function App() {
   }
 
   async function handleFileFormatChange(event: React.ChangeEvent<HTMLSelectElement>) {
+    if (commandDisabled) {
+      return;
+    }
     const nextOption = pickFriendlyFormatOption(formatModel.options, {
       fileFormatValue: event.target.value,
       qualityValue: selectedFormatOption?.qualityValue ?? "",
@@ -276,16 +289,17 @@ function App() {
   }
 
   async function handleSelectItem(itemId: string) {
-    if (itemId === appState?.selected_item_id) {
+    if (itemId === appState?.selected_item_id || controlsDisabled) {
       return;
     }
+    setLoadedThumbnailSrc("");
     await runStateCommand(bridgeClient.selectItem(itemId), {
       resetInspection: true,
     });
   }
 
   async function handleStartDownload() {
-    if (!selectedItem) {
+    if (!selectedItem || commandDisabled) {
       return;
     }
 
@@ -316,7 +330,7 @@ function App() {
   }
 
   async function handleInspectOutput() {
-    if (!selectedItem?.output_path) {
+    if (!selectedItem?.output_path || actionBusy || !shellReady) {
       return;
     }
 
@@ -346,7 +360,55 @@ function App() {
   }
 
   async function handlePickOutputDir() {
+    if (commandDisabled) {
+      return;
+    }
     await runStateCommand(bridgeClient.pickOutputDir());
+  }
+
+  async function handleOpenOutputDir() {
+    if (openOutputDisabled) {
+      return;
+    }
+
+    try {
+      const response = await bridgeClient.openOutputDir();
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (!response.ok) {
+        setBridgeError(response.error?.message ?? "Output folder could not be opened.");
+        return;
+      }
+      setBridgeError("");
+    } catch (error) {
+      if (isMountedRef.current) {
+        setBridgeError(formatError(error));
+      }
+    }
+  }
+
+  async function handlePasteFromClipboard() {
+    if (pasteDisabled) {
+      return;
+    }
+
+    try {
+      const clipboardText = await readClipboardText();
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (!clipboardText) {
+        setBridgeError("Clipboard does not contain text.");
+        return;
+      }
+      setBridgeError("");
+      setUrlInput(clipboardText);
+    } catch (error) {
+      if (isMountedRef.current) {
+        setBridgeError(formatError(error));
+      }
+    }
   }
 
   const variantProps: VariantProps = {
@@ -359,7 +421,7 @@ function App() {
     selectedFormatOption,
     controlsDisabled,
     thumbnailLoaded,
-    onThumbnailLoad: () => setThumbnailLoaded(true),
+    onThumbnailLoad: () => setLoadedThumbnailSrc(selectedThumbnailSrc),
     onSelectItem: (id) => void handleSelectItem(id),
     onModeChange: (mode) => void handleModeChange(mode),
     onQualityChange: (event) => void handleQualityChange(event),
@@ -374,18 +436,28 @@ function App() {
     <div className="app-root">
       <header className="topbar">
         <form className="url-form" onSubmit={handleAddUrl}>
-          <input
-            aria-label="YouTube URL"
-            className="url-input"
-            disabled={controlsDisabled}
-            id="youtube-link"
-            onChange={(event) => setUrlInput(event.target.value)}
-            placeholder="Paste a YouTube link..."
-            value={urlInput}
-          />
+          <div className="url-input-shell">
+            <input
+              aria-label="YouTube URL"
+              className="url-input"
+              disabled={!shellReady}
+              id="youtube-link"
+              onChange={(event) => setUrlInput(event.target.value)}
+              placeholder="Paste a YouTube link..."
+              value={urlInput}
+            />
+            <button
+              className="btn sm clipboard-btn"
+              disabled={pasteDisabled}
+              onClick={() => void handlePasteFromClipboard()}
+              type="button"
+            >
+              Paste
+            </button>
+          </div>
           <button
             className="btn primary"
-            disabled={controlsDisabled || !urlInput.trim()}
+            disabled={commandDisabled || !urlInput.trim()}
             type="submit"
           >
             Add to queue
@@ -399,15 +471,20 @@ function App() {
 
         <button
           className="btn"
-          disabled={controlsDisabled}
+          disabled={commandDisabled}
           onClick={() => void handlePickOutputDir()}
           type="button"
         >
           Browse
         </button>
 
-        <button className="btn" onClick={() => setCompareMode(!compareMode)} type="button">
-          {compareMode ? "Single mode" : "Compare A/B/C"}
+        <button
+          className="btn"
+          disabled={openOutputDisabled}
+          onClick={() => void handleOpenOutputDir()}
+          type="button"
+        >
+          Open
         </button>
 
         <span
@@ -512,6 +589,23 @@ function CompareStand({
       </div>
     </section>
   );
+}
+
+async function readClipboardText() {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+    try {
+      return (await navigator.clipboard.readText()).trim();
+    } catch {
+      // Fall back to the bridge when browser clipboard access is unavailable.
+    }
+  }
+
+  const response = await bridgeClient.readClipboardText();
+  if (!response.ok) {
+    throw new BridgeClientError(response.error?.message ?? "Clipboard read failed.");
+  }
+
+  return response.data.text.trim();
 }
 
 function formatError(error: unknown) {

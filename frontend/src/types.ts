@@ -146,6 +146,15 @@ export interface StartDownloadPayload extends AppStatePayload {
   item_id: string;
 }
 
+export interface ClipboardTextPayload {
+  text: string;
+}
+
+export interface OpenOutputDirPayload {
+  opened: boolean;
+  output_dir: string;
+}
+
 export interface InspectOutputPayload {
   output_path: string;
   inspection: Record<string, unknown> | null;

@@ -139,6 +139,14 @@ a {
   align-items: center;
 }
 
+.url-input-shell {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .url-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -149,6 +157,10 @@ a {
   background: var(--bg-input);
   font-size: 12.5px;
   transition: border-color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
+}
+
+.clipboard-btn {
+  flex: 0 0 auto;
 }
 
 .url-input:focus,
@@ -378,6 +390,7 @@ a {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -407,9 +420,9 @@ a {
 }
 
 .thumb.mini {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 44px;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
   border-radius: 10px;
 }
 
@@ -509,8 +522,8 @@ a {
 }
 
 .status.block {
-  padding: 14px 16px;
-  gap: 6px;
+  padding: 12px 14px;
+  gap: 4px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -628,7 +641,7 @@ a {
 }
 
 .queue-row.rail {
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
@@ -975,7 +988,7 @@ a {
 .variant-c .focus-body {
   padding: 18px;
   display: grid;
-  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
   gap: 22px;
   align-content: start;
   overflow-y: auto;
@@ -991,11 +1004,16 @@ a {
 .variant-c .focus-preview-card {
   display: grid;
   gap: 12px;
-  padding: 14px;
+  padding: 18px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   background:
     linear-gradient(180deg, rgba(18, 24, 33, 0.98) 0%, rgba(14, 19, 26, 0.94) 100%);
+}
+
+.variant-c .focus-preview-card .thumb {
+  max-width: min(100%, 420px);
+  justify-self: center;
 }
 
 .focus-preview-copy,
@@ -1410,6 +1428,10 @@ a {
   .url-form {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .url-input-shell {
+    width: 100%;
   }
 
   .save-to {

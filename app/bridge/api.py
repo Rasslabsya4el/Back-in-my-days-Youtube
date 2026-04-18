@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import time
 from copy import deepcopy
@@ -86,13 +89,15 @@ class AppBridgeApi:
             )
         return self._state_response(state)
 
-    def select_item(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        if self._download_is_active():
-            return self._error_response(
-                code="download_in_progress",
-                message="Bridge mutations are blocked while a download is running.",
-            )
+    def read_clipboard_text(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
+        try:
+            text = self._read_clipboard_text()
+        except RuntimeError as error:
+            return self._error_response(code="clipboard_unavailable", message=str(error))
+        return self._response(data={"text": text})
 
+    def select_item(self, payload: dict[str, Any] | str | None = None) -> dict[str, Any]:
         try:
             item_id = self._read_optional_string(payload, "item_id")
         except ValueError as error:
@@ -163,6 +168,29 @@ class AppBridgeApi:
             data={
                 "cancelled": False,
                 "state": state.to_dict(),
+            }
+        )
+
+    def open_output_dir(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
+        output_dir = str(self._latest_state_copy().get("runtime", {}).get("output_dir", "")).strip()
+        if not output_dir:
+            return self._error_response(
+                code="output_dir_unavailable",
+                message="Current output folder is not available yet.",
+            )
+
+        target_dir = Path(output_dir).expanduser().resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._open_directory(target_dir)
+        except RuntimeError as error:
+            return self._error_response(code="open_output_dir_failed", message=str(error))
+
+        return self._response(
+            data={
+                "opened": True,
+                "output_dir": str(target_dir),
             }
         )
 
@@ -456,3 +484,33 @@ class AppBridgeApi:
         if isinstance(result, (list, tuple)):
             return str(result[0]).strip() if result else ""
         return str(result).strip()
+
+    @staticmethod
+    def _open_directory(target_dir: Path) -> None:
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(target_dir))
+                return
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(target_dir)], check=True)
+                return
+            subprocess.run(["xdg-open", str(target_dir)], check=True)
+        except Exception as error:
+            raise RuntimeError(f"Unable to open the output folder ({error}).") from error
+
+    @staticmethod
+    def _read_clipboard_text() -> str:
+        try:
+            from tkinter import TclError, Tk
+
+            root = Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            try:
+                return str(root.clipboard_get()).strip()
+            except TclError:
+                return ""
+            finally:
+                root.destroy()
+        except Exception as error:
+            raise RuntimeError(f"Unable to read clipboard text ({error}).") from error

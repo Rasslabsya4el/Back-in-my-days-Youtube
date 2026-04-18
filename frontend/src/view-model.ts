@@ -171,7 +171,7 @@ export function buildSelectedStatusDetail(selectedItem: QueueItemSnapshot | null
         describeProcessingStep(selectedItem.processing_step)
       );
     case "completed":
-      return selectedItem.output_path ? compactPath(selectedItem.output_path, 4) : "Saved file ready.";
+      return selectedItem.output_path ? `Saved as ${pathLeaf(selectedItem.output_path)}.` : "File saved.";
     case "failed":
     case "cancelled":
       return (
@@ -358,7 +358,7 @@ export function buildUnifiedStatus(
     return {
       tone: "error",
       label: "Bridge error",
-      headline: "Desktop bridge unreachable",
+      headline: "",
       detail: bridgeError,
       detailMono: false,
     };
@@ -368,7 +368,7 @@ export function buildUnifiedStatus(
     return {
       tone: "idle",
       label: "Idle",
-      headline: "No item selected",
+      headline: "",
       detail: "Paste a YouTube link above to add the first item.",
       detailMono: false,
     };
@@ -384,7 +384,7 @@ export function buildUnifiedStatus(
       return {
         tone: "busy",
         label: describeQueueStatus(item),
-        headline: stepHeadline(item.processing_step),
+        headline: "",
         detail: stepDetail,
         detailMono: false,
       };
@@ -393,9 +393,9 @@ export function buildUnifiedStatus(
       return {
         tone: "ready",
         label: "Completed",
-        headline: "Download complete",
-        detail: item.output_path ? compactPath(item.output_path, 4) : "File saved.",
-        detailMono: Boolean(item.output_path),
+        headline: "",
+        detail: item.output_path ? `Saved as ${pathLeaf(item.output_path)}.` : "File saved.",
+        detailMono: false,
       };
     case "failed":
     case "cancelled": {
@@ -403,7 +403,7 @@ export function buildUnifiedStatus(
       return {
         tone: "error",
         label: item.status === "cancelled" ? "Stopped" : "Failed",
-        headline: item.status === "cancelled" ? "Download stopped" : "Download failed",
+        headline: "",
         detail: snippet || "Review the error details and retry.",
         detailMono: false,
       };
@@ -413,28 +413,11 @@ export function buildUnifiedStatus(
       return {
         tone: "idle",
         label: "Ready",
-        headline: "Ready to download",
+        headline: "",
         detail,
         detailMono: false,
       };
     }
-  }
-}
-
-function stepHeadline(step: QueueItemSnapshot["processing_step"]) {
-  switch (step) {
-    case "preparing":
-      return "Preparing download";
-    case "downloading":
-      return "Downloading";
-    case "postprocessing":
-      return "Finalizing file";
-    case "completed":
-      return "Download complete";
-    case "failed":
-      return "Download failed";
-    default:
-      return "Download in progress";
   }
 }
 

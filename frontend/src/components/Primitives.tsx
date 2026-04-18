@@ -42,6 +42,9 @@ export function Thumb({
         onLoad={onLoad}
         src={src}
       />
+      {!loaded ? (
+        <span className="placeholder">{size === "mini" ? "." : "Loading preview"}</span>
+      ) : null}
     </div>
   );
 }
@@ -56,12 +59,12 @@ export function StatusSurface({
   return (
     <div
       className={`status tone-${status.tone}${variant === "block" ? " block" : ""}`}
-      title={status.detail}
+      title={status.detail || status.headline}
     >
       <span className="status-label">{status.label}</span>
       {variant === "block" ? (
         <>
-          <strong className="status-headline">{status.headline}</strong>
+          {status.headline ? <strong className="status-headline">{status.headline}</strong> : null}
           {status.detail ? (
             <span className={`status-detail${status.detailMono ? " mono" : ""}`}>
               {status.detail}
