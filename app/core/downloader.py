@@ -83,7 +83,6 @@ class QueueItemDownloader:
             plan = self._build_plan(item, output_dir=output_dir)
             self._ensure_required_tools(postprocessor, item.mode)
             self._prepare_temp_dir(temp_dir)
-            self._remove_if_exists(plan.output_path)
 
             self._set_state(
                 item,
@@ -425,10 +424,27 @@ class QueueItemDownloader:
 
     def _predict_output_path(self, item: QueueItem, *, output_dir: Path | None = None) -> Path:
         suffix = ".m4a" if item.mode == DownloadMode.AUDIO else ".mp4"
-        title = item.title or item.source_url
+        title = item.title or (item.probe.title if item.probe else "") or item.source_url
         safe_title = self._sanitize_filename(title)
         target_dir = output_dir or self.config.output_dir
-        return target_dir / f"{safe_title}-{item.id[:8]}{suffix}"
+        return self._resolve_output_collision(
+            target_dir=target_dir,
+            safe_title=safe_title,
+            suffix=suffix,
+        )
+
+    @staticmethod
+    def _resolve_output_collision(*, target_dir: Path, safe_title: str, suffix: str) -> Path:
+        candidate = target_dir / f"{safe_title}{suffix}"
+        if not candidate.exists():
+            return candidate
+
+        collision_index = 2
+        while True:
+            candidate = target_dir / f"{safe_title} ({collision_index}){suffix}"
+            if not candidate.exists():
+                return candidate
+            collision_index += 1
 
     def _prepare_temp_dir(self, temp_dir: Path) -> None:
         shutil.rmtree(temp_dir, ignore_errors=True)
