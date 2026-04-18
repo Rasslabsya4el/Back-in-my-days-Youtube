@@ -138,7 +138,7 @@ export function buildItemSubtitle(item: QueueItemSnapshot) {
 
 export function buildQueueProgressNote(item: QueueItemSnapshot) {
   if (item.status === "completed") {
-    return item.output_path ? `Saved as ${pathLeaf(item.output_path)}.` : "File saved.";
+    return "File ready.";
   }
 
   if (item.status === "failed" || item.status === "cancelled") {
@@ -171,7 +171,7 @@ export function buildSelectedStatusDetail(selectedItem: QueueItemSnapshot | null
         describeProcessingStep(selectedItem.processing_step)
       );
     case "completed":
-      return selectedItem.output_path ? `Saved as ${pathLeaf(selectedItem.output_path)}.` : "File saved.";
+      return "File ready.";
     case "failed":
     case "cancelled":
       return (
@@ -294,19 +294,17 @@ export function buildPrimaryStatusMessage(
   statusMessage: string,
 ) {
   if (bridgeError) {
-    return "The app cannot reach the desktop bridge right now. Open debug for technical details.";
+    return "The app hit a temporary error. Review the message above for details.";
   }
   if (!selectedItem) {
-    return "Paste a YouTube link, confirm where to save it, then add it to the queue.";
+    return "Enter a YouTube link, confirm where to save it, then add it to the queue.";
   }
 
   switch (selectedItem.status) {
     case "running":
       return "The selected item is downloading. This panel updates automatically while it runs.";
     case "completed":
-      return selectedItem.output_path
-        ? `Saved as ${pathLeaf(selectedItem.output_path)}.`
-        : "The download finished and the file is ready.";
+      return "The download finished and the file is ready.";
     case "failed":
     case "cancelled":
       return "This item did not finish. Review the selection and retry, or open debug for technical details.";
@@ -357,7 +355,7 @@ export function buildUnifiedStatus(
   if (bridgeError) {
     return {
       tone: "error",
-      label: "Bridge error",
+      label: "Connection issue",
       headline: "",
       detail: bridgeError,
       detailMono: false,
@@ -369,7 +367,7 @@ export function buildUnifiedStatus(
       tone: "idle",
       label: "Idle",
       headline: "",
-      detail: "Paste a YouTube link above to add the first item.",
+      detail: "Enter a YouTube link above to add the first item.",
       detailMono: false,
     };
   }
@@ -394,7 +392,7 @@ export function buildUnifiedStatus(
         tone: "ready",
         label: "Completed",
         headline: "",
-        detail: item.output_path ? `Saved as ${pathLeaf(item.output_path)}.` : "File saved.",
+        detail: "File ready.",
         detailMono: false,
       };
     case "failed":
@@ -587,10 +585,4 @@ function isTechnicalStatusMessage(message: string) {
     lowered.includes("resolver status") ||
     lowered.includes("fmt ")
   );
-}
-
-function pathLeaf(pathValue: string) {
-  const normalized = pathValue.replace(/\//g, "\\");
-  const parts = normalized.split("\\").filter(Boolean);
-  return parts[parts.length - 1] ?? normalized;
 }

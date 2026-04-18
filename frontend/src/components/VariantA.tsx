@@ -9,8 +9,7 @@ export function VariantA(props: VariantProps) {
     selectedItem,
     selectedItemId,
     controlsDisabled,
-    thumbnailLoaded,
-    onThumbnailLoad,
+    selectionDisabled,
     onSelectItem,
     selectedStatus,
     buildItemStatus,
@@ -27,14 +26,14 @@ export function VariantA(props: VariantProps) {
         {queue.length === 0 ? (
           <div className="empty">
             <span className="empty-title">Queue is empty</span>
-            <span>Paste a YouTube link above to add the first item.</span>
+            <span>Enter a YouTube link above to add the first item.</span>
           </div>
         ) : (
           <ul className="queue-list panel-body scroll flush">
             {queue.map((item) => (
               <li key={item.id}>
                 <QueueRowCard
-                  disabled={controlsDisabled}
+                  disabled={selectionDisabled}
                   item={item}
                   onClick={() => onSelectItem(item.id)}
                   selected={item.id === selectedItemId}
@@ -55,8 +54,6 @@ export function VariantA(props: VariantProps) {
             <div className="left-col">
               <Thumb
                 alt={selectedItem.title || "Selected media thumbnail"}
-                loaded={thumbnailLoaded}
-                onLoad={onThumbnailLoad}
                 src={selectedItem.probe?.thumbnail ?? ""}
               />
             </div>
@@ -79,8 +76,6 @@ export function VariantA(props: VariantProps) {
                 onModeChange={props.onModeChange}
                 onQualityChange={props.onQualityChange}
                 onStart={props.onStart}
-                onStartAll={props.onStartAll}
-                queuedItemCount={props.queuedItemCount}
                 selectedFormatOption={props.selectedFormatOption}
                 selectedItem={selectedItem}
               />

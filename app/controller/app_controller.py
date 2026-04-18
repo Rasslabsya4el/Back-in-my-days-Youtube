@@ -254,6 +254,21 @@ class AppController:
             self._status_message = f"Downloads will be saved to {resolved_output_dir}."
         return self._emit_state()
 
+    def clear_queue(self) -> AppState:
+        with self._state_lock:
+            if any(item.is_running() for item in self._items):
+                self._status_message = "Finish active downloads before clearing the queue."
+                return self._emit_state()
+
+            self._items = []
+            self._selected_item_id = None
+            self._current_mode = DownloadMode.VIDEO
+            self._current_quality = ""
+            self._reserved_output_paths_by_item_id.clear()
+            self._status_message = "Queue cleared."
+            self.store.clear()
+        return self._emit_state()
+
     def start_download(self, item_id: str | None = None) -> AppState:
         with self._state_lock:
             item = self._find_item_locked(item_id) if item_id else self._selected_item_locked()

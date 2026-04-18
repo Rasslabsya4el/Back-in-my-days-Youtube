@@ -1,6 +1,7 @@
 import type {
   AppStatePayload,
   BridgeResponse,
+  ClearQueuePayload,
   GetAppStatePayload,
   InspectOutputPayload,
   RuntimeInfoPayload,
@@ -18,6 +19,7 @@ type BridgeMethodName =
   | "select_item"
   | "select_mode"
   | "select_quality"
+  | "clear_queue"
   | "pick_output_dir"
   | "open_output_dir"
   | "start_download"
@@ -32,6 +34,7 @@ export interface AppBridgeApiSurface {
   select_item(payload?: { item_id?: string } | string): Promise<unknown>;
   select_mode(payload?: { mode: "video" | "audio" } | string): Promise<unknown>;
   select_quality(payload?: { quality: string } | string): Promise<unknown>;
+  clear_queue(): Promise<unknown>;
   pick_output_dir(): Promise<unknown>;
   open_output_dir(): Promise<unknown>;
   start_download(payload?: { item_id?: string } | string): Promise<unknown>;
@@ -74,6 +77,10 @@ class BridgeClient {
 
   selectQuality(quality: string) {
     return this.call<AppStatePayload>("select_quality", { quality });
+  }
+
+  clearQueue() {
+    return this.call<ClearQueuePayload>("clear_queue");
   }
 
   pickOutputDir() {

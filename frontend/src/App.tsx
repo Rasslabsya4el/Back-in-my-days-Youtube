@@ -1,18 +1,8 @@
-import {
-  startTransition,
-  useDeferredValue,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from "react";
+import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { BridgeClientError, bridgeClient } from "./bridge";
 import { DebugDrawer } from "./components/DebugDrawer";
-import { VariantA } from "./components/VariantA";
-import { VariantB } from "./components/VariantB";
 import { VariantC } from "./components/VariantC";
-import { useCompareMode } from "./components/VariantSwitcher";
 import type { VariantProps } from "./components/variant-types";
 import type {
   AppState,
@@ -45,12 +35,11 @@ function App() {
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfoPayload | null>(null);
   const [inspection, setInspection] = useState<BridgeResponse<InspectOutputPayload> | null>(null);
   const [bridgeError, setBridgeError] = useState("");
-  const [actionBusy, setActionBusy] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [inspectionBusy, setInspectionBusy] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEventCount, setDebugEventCount] = useState(0);
   const [lastStateSyncAt, setLastStateSyncAt] = useState("");
-  const [loadedThumbnailSrc, setLoadedThumbnailSrc] = useState("");
-  const [compareMode] = useCompareMode();
 
   const isMountedRef = useRef(true);
   const cursorRef = useRef(0);
@@ -58,7 +47,6 @@ function App() {
   const documentHiddenRef = useRef(typeof document !== "undefined" ? document.hidden : false);
 
   const queue = appState?.queue ?? [];
-  const deferredQueue = useDeferredValue(queue);
   const selectedItem = appState?.selected_item ?? null;
   const selection = appState?.selection ?? null;
   const currentMode = selection?.mode ?? selectedItem?.mode ?? "video";
@@ -67,22 +55,29 @@ function App() {
   const outputDir = appState?.runtime.output_dir ?? "";
   const progress = summarizeQueue(queue);
   const queuedItemCount = queue.filter((item) => item.status === "queued").length;
+  const activeDownloadCount =
+    bridgeMeta?.active_download_count ?? queue.filter((item) => item.status === "running").length;
+  const downloadActive =
+    activeDownloadCount > 0 || queue.some((item) => item.status === "running");
   const shellReady = connectionState === "ready";
-  const controlsDisabled = actionBusy || !shellReady;
-  const commandDisabled = actionBusy || !shellReady;
-  const pasteDisabled = !shellReady;
-  const openOutputDisabled = actionBusy || !shellReady || !outputDir;
+  const controlsDisabled = mutationBusy || !shellReady;
+  const selectionDisabled = !shellReady;
+  const commandDisabled = mutationBusy || !shellReady;
+  const openOutputDisabled = !shellReady || !outputDir;
+  const clearQueueDisabled = mutationBusy || !shellReady || !queue.length || downloadActive;
+  const clearQueueReason = downloadActive
+    ? "Finish active downloads before clearing the queue."
+    : queue.length
+      ? "Remove every item from the current queue."
+      : "Queue is already empty.";
   const selectedStatus = buildUnifiedStatus(selectedItem, bridgeError);
-  const selectedThumbnailSrc = selectedItem?.probe?.thumbnail ?? "";
-  const thumbnailLoaded =
-    Boolean(selectedThumbnailSrc) && loadedThumbnailSrc === selectedThumbnailSrc;
-
-  useEffect(() => {
-    setLoadedThumbnailSrc("");
-  }, [selectedItem?.id, selectedThumbnailSrc]);
 
   const applyStatePayload = useEffectEvent(
     (response: BridgeResponse<GetAppStatePayload> | BridgeResponse<{ state: AppState }>) => {
+      if (response.meta.event_cursor < cursorRef.current) {
+        return;
+      }
+
       if (!response.ok) {
         setBridgeError(response.error?.message ?? "Bridge request failed.");
         return;
@@ -210,9 +205,12 @@ function App() {
 
   async function runStateCommand(
     command: Promise<BridgeResponse<{ state: AppState }>>,
-    options?: { resetUrl?: boolean; resetInspection?: boolean },
+    options?: { resetUrl?: boolean; resetInspection?: boolean; trackBusy?: boolean },
   ) {
-    setActionBusy(true);
+    const trackBusy = options?.trackBusy ?? true;
+    if (trackBusy) {
+      setMutationBusy(true);
+    }
     try {
       const response = await command;
       if (!isMountedRef.current) {
@@ -231,8 +229,8 @@ function App() {
       }
       setBridgeError(formatError(error));
     } finally {
-      if (isMountedRef.current) {
-        setActionBusy(false);
+      if (trackBusy && isMountedRef.current) {
+        setMutationBusy(false);
       }
     }
   }
@@ -289,12 +287,12 @@ function App() {
   }
 
   async function handleSelectItem(itemId: string) {
-    if (itemId === appState?.selected_item_id || controlsDisabled) {
+    if (itemId === appState?.selected_item_id || selectionDisabled) {
       return;
     }
-    setLoadedThumbnailSrc("");
     await runStateCommand(bridgeClient.selectItem(itemId), {
       resetInspection: true,
+      trackBusy: false,
     });
   }
 
@@ -303,7 +301,7 @@ function App() {
       return;
     }
 
-    setActionBusy(true);
+    setMutationBusy(true);
     try {
       const response = await bridgeClient.startDownload(selectedItem.id);
       if (!isMountedRef.current) {
@@ -324,7 +322,7 @@ function App() {
       }
     } finally {
       if (isMountedRef.current) {
-        setActionBusy(false);
+        setMutationBusy(false);
       }
     }
   }
@@ -334,7 +332,7 @@ function App() {
       return;
     }
 
-    setActionBusy(true);
+    setMutationBusy(true);
     try {
       const response = await bridgeClient.startAllDownloads();
       if (!isMountedRef.current) {
@@ -355,17 +353,17 @@ function App() {
       }
     } finally {
       if (isMountedRef.current) {
-        setActionBusy(false);
+        setMutationBusy(false);
       }
     }
   }
 
   async function handleInspectOutput() {
-    if (!selectedItem?.output_path || actionBusy || !shellReady) {
+    if (!selectedItem?.output_path || inspectionBusy || !shellReady) {
       return;
     }
 
-    setActionBusy(true);
+    setInspectionBusy(true);
     try {
       const response = await bridgeClient.inspectOutput(selectedItem.output_path);
       if (!isMountedRef.current) {
@@ -385,7 +383,7 @@ function App() {
       }
     } finally {
       if (isMountedRef.current) {
-        setActionBusy(false);
+        setInspectionBusy(false);
       }
     }
   }
@@ -419,47 +417,35 @@ function App() {
     }
   }
 
-  async function handlePasteFromClipboard() {
-    if (pasteDisabled) {
+  async function handleClearQueue() {
+    if (clearQueueDisabled) {
       return;
     }
-
-    try {
-      const clipboardText = await readClipboardText();
-      if (!isMountedRef.current) {
-        return;
-      }
-      if (!clipboardText) {
-        setBridgeError("Clipboard does not contain text.");
-        return;
-      }
-      setBridgeError("");
-      setUrlInput(clipboardText);
-    } catch (error) {
-      if (isMountedRef.current) {
-        setBridgeError(formatError(error));
-      }
-    }
+    await runStateCommand(bridgeClient.clearQueue(), {
+      resetInspection: true,
+    });
   }
 
   const variantProps: VariantProps = {
     appState,
-    queue: deferredQueue,
+    queue,
     selectedItem,
     selectedItemId: appState?.selected_item_id ?? "",
     currentMode,
     formatModel,
     selectedFormatOption,
     controlsDisabled,
-    thumbnailLoaded,
-    onThumbnailLoad: () => setLoadedThumbnailSrc(selectedThumbnailSrc),
+    selectionDisabled,
     onSelectItem: (id) => void handleSelectItem(id),
     onModeChange: (mode) => void handleModeChange(mode),
     onQualityChange: (event) => void handleQualityChange(event),
     onFileFormatChange: (event) => void handleFileFormatChange(event),
     onStart: () => void handleStartDownload(),
     onStartAll: () => void handleStartAllDownloads(),
+    onClearQueue: () => void handleClearQueue(),
     queuedItemCount,
+    clearQueueDisabled,
+    clearQueueReason,
     selectedStatus,
     buildItemStatus: (item) => buildUnifiedStatus(item, ""),
     queueSummary: formatQueueSummary(progress),
@@ -476,17 +462,9 @@ function App() {
               disabled={!shellReady}
               id="youtube-link"
               onChange={(event) => setUrlInput(event.target.value)}
-              placeholder="Paste a YouTube link..."
+              placeholder="Enter a YouTube link..."
               value={urlInput}
             />
-            <button
-              className="btn sm clipboard-btn"
-              disabled={pasteDisabled}
-              onClick={() => void handlePasteFromClipboard()}
-              type="button"
-            >
-              Paste
-            </button>
           </div>
           <button
             className="btn primary"
@@ -519,12 +497,6 @@ function App() {
         >
           Open
         </button>
-
-        <span
-          aria-label={`Bridge connection: ${connectionState}`}
-          className={`conn-dot ${connectionState}`}
-          title={`Bridge: ${connectionState}`}
-        />
       </header>
 
       {bridgeError ? (
@@ -536,16 +508,12 @@ function App() {
         </div>
       ) : null}
 
-      <main className={`workspace-host${compareMode ? " compare-mode-host" : ""}`}>
-        {compareMode ? (
-          <CompareMode variantProps={variantProps} />
-        ) : (
-          <VariantC {...variantProps} />
-        )}
+      <main className="workspace-host">
+        <VariantC {...variantProps} />
       </main>
 
       <DebugDrawer
-        actionBusy={actionBusy}
+        actionBusy={inspectionBusy}
         appState={appState}
         bridgeMeta={bridgeMeta}
         connectionState={connectionState}
@@ -562,83 +530,6 @@ function App() {
       />
     </div>
   );
-}
-
-function CompareMode({ variantProps }: { variantProps: VariantProps }) {
-  return (
-    <div className="compare-mode">
-      <section className="compare-copy panel">
-        <div className="compare-copy-inner">
-          <div>
-            <span className="compare-kicker">Preview only</span>
-            <h2>Variant compare mode</h2>
-            <p>
-              A, B, and C below are rendered together from the same live queue, selection, and
-              bridge-backed state. The scaled stands are view-only previews; return to single mode
-              for full-size interaction.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="compare-grid">
-        <CompareStand label="A">
-          <VariantA {...variantProps} />
-        </CompareStand>
-        <CompareStand label="B">
-          <VariantB {...variantProps} />
-        </CompareStand>
-        <CompareStand label="C">
-          <VariantC {...variantProps} />
-        </CompareStand>
-      </div>
-    </div>
-  );
-}
-
-function CompareStand({
-  label,
-  children,
-}: {
-  label: "A" | "B" | "C";
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-label={`Variant ${label} preview`} className="compare-card">
-      <div className="compare-card-header">
-        <span className="compare-card-label">Variant</span>
-        <strong>{label}</strong>
-      </div>
-
-      <div className="compare-frame-shell">
-        <div aria-hidden="true" className="compare-frame-chrome">
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="compare-frame">
-          <div className="compare-frame-canvas">{children}</div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-async function readClipboardText() {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
-    try {
-      return (await navigator.clipboard.readText()).trim();
-    } catch {
-      // Fall back to the bridge when browser clipboard access is unavailable.
-    }
-  }
-
-  const response = await bridgeClient.readClipboardText();
-  if (!response.ok) {
-    throw new BridgeClientError(response.error?.message ?? "Clipboard read failed.");
-  }
-
-  return response.data.text.trim();
 }
 
 function formatError(error: unknown) {

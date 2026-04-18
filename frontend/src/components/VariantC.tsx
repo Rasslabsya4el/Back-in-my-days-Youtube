@@ -14,13 +14,19 @@ export function VariantC(props: VariantProps) {
     selectedItem,
     selectedItemId,
     controlsDisabled,
-    thumbnailLoaded,
-    onThumbnailLoad,
+    selectionDisabled,
     onSelectItem,
     selectedStatus,
     queueSummary,
     currentMode,
   } = props;
+  const startAllLabel =
+    props.queuedItemCount > 0
+      ? `Download all queued (${props.queuedItemCount})`
+      : "Download all queued";
+  const showClearQueueNote = Boolean(
+    queue.length && props.clearQueueDisabled && props.clearQueueReason,
+  );
 
   return (
     <div className="workspace variant-c">
@@ -28,12 +34,29 @@ export function VariantC(props: VariantProps) {
         <div className="panel-header rail-header">
           <div className="panel-header-copy">
             <h2>Queue</h2>
-            <span className="panel-caption">
-              {queue.length ? "Persisted session items" : "Waiting for the first item"}
-            </span>
+            <span className="queue-summary">{queueSummary}</span>
           </div>
-          <span className="summary">{queueSummary}</span>
+          <div className="queue-header-actions">
+            <button
+              className="btn sm"
+              disabled={controlsDisabled || props.queuedItemCount === 0}
+              onClick={props.onStartAll}
+              type="button"
+            >
+              {startAllLabel}
+            </button>
+            <button
+              className="btn sm"
+              disabled={props.clearQueueDisabled}
+              onClick={props.onClearQueue}
+              title={props.clearQueueReason}
+              type="button"
+            >
+              Clear queue
+            </button>
+          </div>
         </div>
+        {showClearQueueNote ? <div className="queue-header-note">{props.clearQueueReason}</div> : null}
         {queue.length === 0 ? (
           <div className="empty rail-empty">
             <span className="empty-title">Empty</span>
@@ -44,7 +67,7 @@ export function VariantC(props: VariantProps) {
             {queue.map((item) => (
               <li key={item.id}>
                 <QueueRowRail
-                  disabled={controlsDisabled}
+                  disabled={selectionDisabled}
                   item={item}
                   onClick={() => onSelectItem(item.id)}
                   selected={item.id === selectedItemId}
@@ -67,10 +90,7 @@ export function VariantC(props: VariantProps) {
                   </span>
                 </div>
                 <Thumb
-                  key={`${selectedItem.id}:${selectedItem.probe?.thumbnail ?? ""}`}
                   alt={selectedItem.title || "Selected media thumbnail"}
-                  loaded={thumbnailLoaded}
-                  onLoad={onThumbnailLoad}
                   src={selectedItem.probe?.thumbnail ?? ""}
                 />
               </div>
@@ -112,8 +132,6 @@ export function VariantC(props: VariantProps) {
                 onModeChange={props.onModeChange}
                 onQualityChange={props.onQualityChange}
                 onStart={props.onStart}
-                onStartAll={props.onStartAll}
-                queuedItemCount={props.queuedItemCount}
                 selectedFormatOption={props.selectedFormatOption}
                 selectedItem={selectedItem}
               />

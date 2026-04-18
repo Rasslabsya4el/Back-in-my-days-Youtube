@@ -121,6 +121,22 @@ class AppBridgeApi:
         state = self._call_controller(self.controller.select_quality, quality)
         return self._state_response(state)
 
+    def clear_queue(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        del payload
+        if self._active_download_item_ids_copy():
+            return self._error_response(
+                code="downloads_active",
+                message="Finish active downloads before clearing the queue.",
+            )
+
+        state = self._call_controller(self.controller.clear_queue)
+        return self._response(
+            data={
+                "cleared": True,
+                "state": state.to_dict(),
+            }
+        )
+
     def pick_output_dir(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         del payload
         current_output_dir = str(self._latest_state_copy().get("runtime", {}).get("output_dir", ""))

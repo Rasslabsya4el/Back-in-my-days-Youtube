@@ -17,8 +17,6 @@ export function ActionBlock({
   onQualityChange,
   onFileFormatChange,
   onStart,
-  onStartAll,
-  queuedItemCount,
 }: {
   selectedItem: QueueItemSnapshot | null;
   currentMode: DownloadMode;
@@ -29,16 +27,12 @@ export function ActionBlock({
   onQualityChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onFileFormatChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onStart: () => void;
-  onStartAll: () => void;
-  queuedItemCount: number;
 }) {
   const finalFileFormatLabel =
     formatModel.fileFormatChoices[0]?.label ?? formatFinalFileFormat(currentMode);
   const qualityLabel =
     selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Pending";
   const primaryLabel = buildPrimaryActionLabel(selectedItem);
-  const startAllLabel =
-    queuedItemCount > 0 ? `Download all queued (${queuedItemCount})` : "Download all queued";
   const selectionSummary = `${formatModeLabel(currentMode)} / ${qualityLabel} / ${finalFileFormatLabel}`;
   const actionHint = selectedItem
     ? `Final output saves as ${finalFileFormatLabel}.`
@@ -117,14 +111,6 @@ export function ActionBlock({
       <div className="action-footer">
         <span className="action-hint">{actionHint}</span>
         <div className="action-buttons">
-          <button
-            className="btn"
-            disabled={controlsDisabled || queuedItemCount === 0}
-            onClick={onStartAll}
-            type="button"
-          >
-            {startAllLabel}
-          </button>
           <button
             className="btn primary lg"
             disabled={controlsDisabled || !selectedItem || selectedItemRunning}

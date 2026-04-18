@@ -163,6 +163,10 @@ export interface StartAllDownloadsPayload extends AppStatePayload {
   queued_item_ids: string[];
 }
 
+export interface ClearQueuePayload extends AppStatePayload {
+  cleared: boolean;
+}
+
 export interface ClipboardTextPayload {
   text: string;
 }

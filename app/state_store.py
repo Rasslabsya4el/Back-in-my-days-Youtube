@@ -42,3 +42,8 @@ class QueueStateStore:
                 json.dumps(payload, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+
+    def clear(self) -> None:
+        with self._lock:
+            if self.state_file.exists():
+                self.state_file.unlink()

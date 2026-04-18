@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import type { QueueItemSnapshot } from "../types";
 import {
   buildItemSubtitle,
@@ -13,21 +15,24 @@ export function Thumb({
   src,
   alt,
   size,
-  loaded,
-  onLoad,
 }: {
   src: string;
   alt: string;
   size?: "default" | "tiny" | "mini";
-  loaded: boolean;
-  onLoad: () => void;
 }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const cls = `thumb${size === "tiny" ? " tiny" : size === "mini" ? " mini" : ""}`;
 
-  if (!src) {
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
     return (
       <div aria-hidden={size !== "default"} className={cls}>
-        <span className="placeholder">No preview</span>
+        <span className="placeholder">{size === "mini" ? "." : "No preview"}</span>
       </div>
     );
   }
@@ -39,7 +44,8 @@ export function Thumb({
         className={loaded ? "loaded" : ""}
         decoding="async"
         loading="lazy"
-        onLoad={onLoad}
+        onError={() => setFailed(true)}
+        onLoad={() => setLoaded(true)}
         src={src}
       />
       {!loaded ? (

@@ -143,7 +143,6 @@ a {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  gap: 8px;
   align-items: center;
 }
 
@@ -157,10 +156,6 @@ a {
   background: var(--bg-input);
   font-size: 12.5px;
   transition: border-color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
-}
-
-.clipboard-btn {
-  flex: 0 0 auto;
 }
 
 .url-input:focus,
@@ -357,6 +352,26 @@ a {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.queue-summary {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.queue-header-note {
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .panel-body {
@@ -1100,7 +1115,8 @@ a {
 }
 
 .rail-header {
-  align-items: start;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .rail-empty,
@@ -1452,6 +1468,18 @@ a {
   .bridge-error {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .rail-header {
+    align-items: stretch;
+  }
+
+  .queue-header-actions {
+    width: 100%;
+  }
+
+  .queue-header-actions .btn {
+    flex: 1 1 0;
   }
 
   .action-row {

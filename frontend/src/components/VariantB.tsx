@@ -9,8 +9,7 @@ export function VariantB(props: VariantProps) {
     selectedItem,
     selectedItemId,
     controlsDisabled,
-    thumbnailLoaded,
-    onThumbnailLoad,
+    selectionDisabled,
     onSelectItem,
     selectedStatus,
     buildItemStatus,
@@ -33,7 +32,7 @@ export function VariantB(props: VariantProps) {
             </div>
             <div className="empty">
               <span className="empty-title">No operations queued</span>
-              <span>Paste a YouTube link above to start.</span>
+              <span>Enter a YouTube link above to start.</span>
             </div>
           </>
         ) : (
@@ -46,7 +45,7 @@ export function VariantB(props: VariantProps) {
               {queue.map((item) => (
                 <QueueRowTable
                   key={item.id}
-                  disabled={controlsDisabled}
+                  disabled={selectionDisabled}
                   item={item}
                   onClick={() => onSelectItem(item.id)}
                   selected={item.id === selectedItemId}
@@ -66,8 +65,6 @@ export function VariantB(props: VariantProps) {
           <div className="dock-body">
             <Thumb
               alt={selectedItem.title || "Selected media thumbnail"}
-              loaded={thumbnailLoaded}
-              onLoad={onThumbnailLoad}
               src={selectedItem.probe?.thumbnail ?? ""}
             />
 
@@ -88,8 +85,6 @@ export function VariantB(props: VariantProps) {
               onModeChange={props.onModeChange}
               onQualityChange={props.onQualityChange}
               onStart={props.onStart}
-              onStartAll={props.onStartAll}
-              queuedItemCount={props.queuedItemCount}
               selectedFormatOption={props.selectedFormatOption}
               selectedItem={selectedItem}
             />
