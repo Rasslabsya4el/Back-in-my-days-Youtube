@@ -125,7 +125,13 @@ export function VariantC(props: VariantProps) {
                 </dl>
               </div>
 
-              <StatusSurface status={selectedStatus} testIdPrefix="selected-status" variant="block" />
+              <StatusSurface
+                showDetail={false}
+                showHeadline={false}
+                status={selectedStatus}
+                testIdPrefix="selected-status"
+                variant="block"
+              />
 
               <ActionBlock
                 controlsDisabled={controlsDisabled}

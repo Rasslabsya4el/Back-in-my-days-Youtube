@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import type { QueueItemSnapshot } from "../types";
 import {
@@ -22,13 +22,27 @@ export function Thumb({
   size?: "default" | "tiny" | "mini";
   testIdPrefix?: string;
 }) {
-  const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [loadedSrc, setLoadedSrc] = useState("");
+  const [failedSrc, setFailedSrc] = useState("");
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const cls = `thumb${size === "tiny" ? " tiny" : size === "mini" ? " mini" : ""}`;
+  const loaded = loadedSrc === src;
+  const failed = failedSrc === src;
 
-  useEffect(() => {
-    setLoaded(false);
-    setFailed(false);
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    if (!src || !image || !image.complete) {
+      return;
+    }
+
+    if (image.naturalWidth > 0) {
+      setLoadedSrc(src);
+      setFailedSrc((current) => (current === src ? "" : current));
+      return;
+    }
+
+    setFailedSrc(src);
+    setLoadedSrc((current) => (current === src ? "" : current));
   }, [src]);
 
   if (!src || failed) {
@@ -54,9 +68,17 @@ export function Thumb({
         alt={alt}
         className={loaded ? "loaded" : ""}
         decoding="async"
+        key={src}
         loading="lazy"
-        onError={() => setFailed(true)}
-        onLoad={() => setLoaded(true)}
+        onError={() => {
+          setFailedSrc(src);
+          setLoadedSrc((current) => (current === src ? "" : current));
+        }}
+        onLoad={() => {
+          setLoadedSrc(src);
+          setFailedSrc((current) => (current === src ? "" : current));
+        }}
+        ref={imageRef}
         src={src}
         data-testid={testIdPrefix ? `${testIdPrefix}-image` : undefined}
       />
@@ -76,38 +98,45 @@ export function StatusSurface({
   status,
   variant = "row",
   testIdPrefix,
+  showDetail = true,
+  showHeadline = true,
 }: {
   status: UnifiedStatus;
   variant?: "row" | "block";
   testIdPrefix?: string;
+  showDetail?: boolean;
+  showHeadline?: boolean;
 }) {
+  const detail = showDetail ? status.detail : "";
+  const headline = showHeadline ? status.headline : "";
+
   return (
     <div
       className={`status tone-${status.tone}${variant === "block" ? " block" : ""}`}
       data-testid={testIdPrefix}
-      title={status.detail || status.headline}
+      title={detail || headline || status.label}
     >
       <span className="status-label" data-testid={testIdPrefix ? `${testIdPrefix}-label` : undefined}>
         {status.label}
       </span>
       {variant === "block" ? (
         <>
-          {status.headline ? <strong className="status-headline">{status.headline}</strong> : null}
-          {status.detail ? (
+          {headline ? <strong className="status-headline">{headline}</strong> : null}
+          {detail ? (
             <span
               className={`status-detail${status.detailMono ? " mono" : ""}`}
               data-testid={testIdPrefix ? `${testIdPrefix}-detail` : undefined}
             >
-              {status.detail}
+              {detail}
             </span>
           ) : null}
         </>
-      ) : status.detail ? (
+      ) : detail ? (
         <span
           className="status-detail"
           data-testid={testIdPrefix ? `${testIdPrefix}-detail` : undefined}
         >
-          {status.detail}
+          {detail}
         </span>
       ) : null}
     </div>

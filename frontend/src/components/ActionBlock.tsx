@@ -34,9 +34,6 @@ export function ActionBlock({
     selectedFormatOption?.qualityLabel ?? formatModel.qualityChoices[0]?.label ?? "Pending";
   const primaryLabel = buildPrimaryActionLabel(selectedItem);
   const selectionSummary = `${formatModeLabel(currentMode)} / ${qualityLabel} / ${finalFileFormatLabel}`;
-  const actionHint = selectedItem
-    ? `Final output saves as ${finalFileFormatLabel}.`
-    : "Select an item to configure the output.";
   const selectedItemRunning = selectedItem?.status === "running";
 
   return (
@@ -109,9 +106,6 @@ export function ActionBlock({
       </div>
 
       <div className="action-footer">
-        <span className="action-hint" data-testid="action-block-hint">
-          {actionHint}
-        </span>
         <div className="action-buttons">
           <button
             className="btn primary lg"
