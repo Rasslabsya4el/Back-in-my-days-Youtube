@@ -75,6 +75,7 @@ def build_config() -> AppConfig:
     default_config = create_default_config(PROJECT_ROOT)
     return AppConfig(
         project_root=PROJECT_ROOT,
+        resource_project_root=default_config.resource_project_root,
         runtime_dir=PROOF_DIR,
         output_dir=OUTPUT_DIR,
         temp_dir=TEMP_DIR,

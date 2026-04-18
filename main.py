@@ -114,6 +114,7 @@ def create_smoke_config(state_file_name: str) -> AppConfig:
     config = create_default_config()
     return AppConfig(
         project_root=config.project_root,
+        resource_project_root=config.resource_project_root,
         runtime_dir=config.runtime_dir,
         output_dir=config.output_dir,
         temp_dir=config.temp_dir,
@@ -682,6 +683,7 @@ def run_smoke_bridge_concurrency() -> int:
 
     config = AppConfig(
         project_root=base_config.project_root,
+        resource_project_root=base_config.resource_project_root,
         runtime_dir=proof_root,
         output_dir=output_dir,
         temp_dir=temp_dir,

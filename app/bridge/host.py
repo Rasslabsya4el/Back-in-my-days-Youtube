@@ -7,6 +7,7 @@ from pathlib import Path
 from types import ModuleType
 
 from .api import AppBridgeApi
+from ..paths import frontend_dist_dir, icon_path
 
 DEFAULT_BRIDGE_HTML = """\
 <!doctype html>
@@ -211,9 +212,10 @@ class PywebviewHost:
                     self._destroy_after_delay,
                     args=(window, auto_close_after),
                     debug=debug,
+                    icon=self._icon_path(),
                 )
             else:
-                webview.start(debug=debug)
+                webview.start(debug=debug, icon=self._icon_path())
         except BridgeHostError:
             raise
         except Exception as error:  # pragma: no cover - real GUI backend failures are environment-specific
@@ -241,4 +243,11 @@ class PywebviewHost:
 
     @staticmethod
     def _built_index_path() -> Path:
-        return Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
+        return frontend_dist_dir() / "index.html"
+
+    @staticmethod
+    def _icon_path() -> str | None:
+        packaged_icon = icon_path()
+        if packaged_icon is not None:
+            return str(packaged_icon)
+        return None

@@ -4,6 +4,8 @@ __pycache__/
 runtime/
 output/
 temp/
+/build/
+/dist/
 node_modules/
 
 .venv/

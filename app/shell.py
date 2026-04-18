@@ -5,6 +5,7 @@ from tkinter import ttk
 
 from .controller import AppController, AppState, ProbeSnapshot, QueueItemSnapshot, ToolStatus
 from .core import DownloadPipelineError, YoutubeProbeError
+from .paths import icon_path
 
 
 class AppShell:
@@ -14,6 +15,12 @@ class AppShell:
         self.root.title("YT Downloader v1")
         self.root.geometry("980x700")
         self.root.minsize(880, 620)
+        window_icon = icon_path()
+        if window_icon is not None:
+            try:
+                self.root.iconbitmap(default=str(window_icon))
+            except tk.TclError:
+                pass
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="video")
         self.quality_var = tk.StringVar()

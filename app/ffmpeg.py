@@ -54,11 +54,7 @@ class MediaToolResolver:
 
     def _project_candidates(self, name: str) -> list[Path]:
         exe_name = f"{name}.exe" if os.name == "nt" else name
-        roots = [
-            self.config.bundled_tools_dir,
-            self.config.project_root / "tools",
-            self.config.project_root / "vendor",
-        ]
+        roots = list(self.config.bundled_tools_roots)
         suffixes = [
             Path(exe_name),
             Path("bin") / exe_name,

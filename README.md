@@ -43,6 +43,29 @@ Build the React shell into `frontend/dist`:
 npm run build
 ```
 
+## Windows packaging
+
+Bootstrap the packaging toolchain once:
+
+```powershell
+poetry install --with packaging
+```
+
+Canonical portable build command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
+```
+
+This produces a portable `onedir` release at `dist\YT Downloader\`. The final executable is
+`dist\YT Downloader\YT Downloader.exe`.
+
+PyInstaller keeps bundled resources under `dist\YT Downloader\_internal\`. The packaged app
+resolves `frontend/dist` and `app/assets` from that frozen resource root, while writable
+`runtime/`, `output/`, and `temp/` directories stay next to the executable in the portable folder.
+Bundled tool roots (`app/bin`, `tools`, `vendor`) are also resolved from `_internal`. The same
+`.ico` file is used both for the window runtime and for the embedded executable icon.
+
 ## Local start
 
 Run the desktop shell:
