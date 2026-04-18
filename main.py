@@ -882,10 +882,29 @@ def _load_live_ui_harness_helper():
     return module
 
 
+def _load_live_windows_audio_art_helper():
+    helper_path = (
+        Path(__file__).resolve().parent
+        / "scripts"
+        / "validation"
+        / "live_windows_audio_art_harness_support.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "live_windows_audio_art_harness_support",
+        helper_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load validation helper from {helper_path}.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_bridge_shell(*, start_url: str | None, debug: bool) -> int:
     controller = AppController(create_default_config())
     bridge = AppBridgeApi(controller)
     harness_config_path = os.environ.get("YT_UI_HARNESS_CONFIG", "").strip()
+    live_windows_art_config_path = os.environ.get("YT_WINDOWS_AUDIO_ART_PROOF_CONFIG", "").strip()
     if harness_config_path:
         helper = _load_live_ui_harness_helper()
         return int(
@@ -894,6 +913,16 @@ def run_bridge_shell(*, start_url: str | None, debug: bool) -> int:
                 start_url=start_url,
                 debug=debug,
                 config_path=Path(harness_config_path),
+            )
+        )
+    if live_windows_art_config_path:
+        helper = _load_live_windows_audio_art_helper()
+        return int(
+            helper.run_live_windows_audio_art_harness(
+                bridge_api=bridge,
+                start_url=start_url,
+                debug=debug,
+                config_path=Path(live_windows_art_config_path),
             )
         )
 
