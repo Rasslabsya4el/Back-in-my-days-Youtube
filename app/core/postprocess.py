@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..ffmpeg import BinaryResolution
 from .audio_metadata import AudioMetadata, download_artwork
+from .stage_scheduler import DownloadStageScheduler
 
 
 class MediaPostprocessError(Exception):
@@ -19,9 +20,11 @@ class MediaPostProcessor:
         *,
         ffmpeg: BinaryResolution,
         ffprobe: BinaryResolution,
+        scheduler: DownloadStageScheduler | None = None,
     ) -> None:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
+        self.scheduler = scheduler or DownloadStageScheduler()
 
     def finalize_video(
         self,
@@ -29,6 +32,7 @@ class MediaPostProcessor:
         video_input: Path,
         output_path: Path,
         audio_input: Path | None = None,
+        on_status_detail: Callable[[str], None] | None = None,
     ) -> Path:
         self._ensure_ffmpeg("ffmpeg is required to produce the final mp4 output.")
         self._remove_if_exists(output_path)
@@ -54,47 +58,25 @@ class MediaPostProcessor:
                 )
             except MediaPostprocessError:
                 self._remove_if_exists(output_path)
-                self._run_ffmpeg(
-                    description="transcode video to mp4",
-                    arguments=[
-                        *base_command,
-                        *self._video_maps(audio_input=audio_input),
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "fast",
-                        "-crf",
-                        "23",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "192k",
-                        "-movflags",
-                        "+faststart",
-                        str(output_path),
-                    ],
+                self._run_heavy_video_transcode(
+                    output_path=output_path,
+                    arguments=self._video_transcode_arguments(
+                        base_command=base_command,
+                        audio_input=audio_input,
+                        output_path=output_path,
+                    ),
+                    on_status_detail=on_status_detail,
                 )
         else:
             self._remove_if_exists(output_path)
-            self._run_ffmpeg(
-                description="transcode video to mp4",
-                arguments=[
-                    *base_command,
-                    *self._video_maps(audio_input=audio_input),
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-crf",
-                    "23",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
-                ],
+            self._run_heavy_video_transcode(
+                output_path=output_path,
+                arguments=self._video_transcode_arguments(
+                    base_command=base_command,
+                    audio_input=audio_input,
+                    output_path=output_path,
+                ),
+                on_status_detail=on_status_detail,
             )
 
         self._validate_output(output_path, "mp4")
@@ -273,6 +255,29 @@ class MediaPostProcessor:
             raise MediaPostprocessError("Audio post-processing finished without running ffmpeg.")
         raise last_error
 
+    def _run_heavy_video_transcode(
+        self,
+        *,
+        output_path: Path,
+        arguments: list[str],
+        on_status_detail: Callable[[str], None] | None,
+    ) -> None:
+        with self.scheduler.acquire_heavy_video_transcode_slot(
+            on_wait=lambda: self._publish_status(
+                on_status_detail,
+                "Waiting for the video transcode slot.",
+            ),
+            on_acquired=lambda: self._publish_status(
+                on_status_detail,
+                "Transcoding video into final mp4 output.",
+            ),
+        ):
+            self._remove_if_exists(output_path)
+            self._run_ffmpeg(
+                description="transcode video to mp4",
+                arguments=arguments,
+            )
+
     @staticmethod
     def _audio_arguments(
         *,
@@ -315,6 +320,31 @@ class MediaPostProcessor:
         return arguments
 
     @staticmethod
+    def _video_transcode_arguments(
+        *,
+        base_command: list[str],
+        audio_input: Path | None,
+        output_path: Path,
+    ) -> list[str]:
+        return [
+            *base_command,
+            *MediaPostProcessor._video_maps(audio_input=audio_input),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+
+    @staticmethod
     def _describe_audio_variant(*, copy_audio: bool, has_artwork: bool) -> str:
         action = "remux" if copy_audio else "transcode"
         detail = " with artwork" if has_artwork else ""
@@ -334,6 +364,17 @@ class MediaPostProcessor:
         if result.returncode != 0:
             del description
             raise MediaPostprocessError(self._postprocess_failed_message(Path(arguments[-1])))
+
+    @staticmethod
+    def _publish_status(
+        callback: Callable[[str], None] | None,
+        detail: str,
+    ) -> None:
+        if callback is not None:
+            try:
+                callback(detail)
+            except Exception:
+                return
 
     def _ensure_ffmpeg(self, message: str) -> None:
         if not self.ffmpeg.is_available:

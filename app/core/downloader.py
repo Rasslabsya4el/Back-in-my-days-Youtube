@@ -15,6 +15,7 @@ from ..ffmpeg import BinaryResolution, MediaToolResolver
 from ..models import DownloadMode, FormatOption, JobStatus, JobStep, QueueItem
 from .audio_metadata import AudioMetadata
 from .postprocess import MediaPostProcessor, MediaPostprocessError
+from .stage_scheduler import DownloadStageScheduler
 
 
 class DownloadPipelineError(Exception):
@@ -60,6 +61,7 @@ class QueueItemDownloader:
     ) -> None:
         self.config = config
         self.tool_resolver = tool_resolver or MediaToolResolver(config)
+        self.stage_scheduler = DownloadStageScheduler()
 
     def execute(
         self,
@@ -107,6 +109,7 @@ class QueueItemDownloader:
                 downloaded=downloaded,
                 postprocessor=postprocessor,
                 temp_dir=temp_dir,
+                on_update=on_update,
             )
 
             item.output_path = str(final_path)
@@ -276,6 +279,7 @@ class QueueItemDownloader:
         downloaded: DownloadedMedia,
         postprocessor: MediaPostProcessor,
         temp_dir: Path,
+        on_update: Callable[[QueueItem], None] | None = None,
     ) -> Path:
         if item.mode == DownloadMode.AUDIO:
             if downloaded.audio_path is None:
@@ -308,6 +312,10 @@ class QueueItemDownloader:
             video_input=downloaded.video_path,
             audio_input=downloaded.audio_path,
             output_path=plan.output_path,
+            on_status_detail=self._build_postprocess_status_callback(
+                item,
+                on_update=on_update,
+            ),
         )
 
     def _download_format(
@@ -424,6 +432,7 @@ class QueueItemDownloader:
         return MediaPostProcessor(
             ffmpeg=self.tool_resolver.resolve_ffmpeg(),
             ffprobe=self.tool_resolver.resolve_ffprobe(),
+            scheduler=self.stage_scheduler,
         )
 
     def _pick_companion_audio(self, item: QueueItem) -> FormatOption:
@@ -507,6 +516,26 @@ class QueueItemDownloader:
         item.touch()
         if on_update is not None:
             on_update(item)
+
+    @staticmethod
+    def _build_postprocess_status_callback(
+        item: QueueItem,
+        *,
+        on_update: Callable[[QueueItem], None] | None,
+    ) -> Callable[[str], None] | None:
+        if on_update is None:
+            return None
+
+        def publish(detail: str) -> None:
+            if item.status != JobStatus.RUNNING or item.processing_step != JobStep.POSTPROCESSING:
+                return
+            if item.status_detail == detail:
+                return
+            item.status_detail = detail
+            item.touch()
+            on_update(item)
+
+        return publish
 
     @staticmethod
     def _download_detail(plan: DownloadPlan) -> str:
