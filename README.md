@@ -57,14 +57,33 @@ Canonical portable build command:
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
 ```
 
+Before running the command, set `YT_PORTABLE_MEDIA_TOOLS_DIR` to an explicit FFmpeg bundle root.
+The root must contain both `ffmpeg.exe` and `ffprobe.exe` in one of the supported layouts relative
+to that root: `<root>\<tool>.exe`, `<root>\bin\<tool>.exe`, `<root>\ffmpeg\<tool>.exe`,
+`<root>\ffmpeg\bin\<tool>.exe`, or `<root>\win-x64\<tool>.exe`.
+
+Example:
+
+```powershell
+$env:YT_PORTABLE_MEDIA_TOOLS_DIR = 'C:\tools\ffmpeg-8.1-essentials_build'
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
+```
+
 This produces a portable `onedir` release at `dist\YT Downloader\`. The final executable is
 `dist\YT Downloader\YT Downloader.exe`.
+
+The build script stages that explicit payload under `build\portable-media-tools\app\bin\` and
+passes it into PyInstaller as bundled media tools. If `YT_PORTABLE_MEDIA_TOOLS_DIR` is missing,
+or the root does not contain both `ffmpeg` and `ffprobe`, the build fails before the frontend or
+PyInstaller steps. A portable artifact is not allowed to fall back to system `PATH`.
 
 PyInstaller keeps bundled resources under `dist\YT Downloader\_internal\`. The packaged app
 resolves `frontend/dist` and `app/assets` from that frozen resource root, while writable
 `runtime/`, `output/`, and `temp/` directories stay next to the executable in the portable folder.
-Bundled tool roots (`app/bin`, `tools`, `vendor`) are also resolved from `_internal`. The same
-`.ico` file is used both for the window runtime and for the embedded executable icon.
+Bundled tool roots (`app/bin`, `tools`, `vendor`) are also resolved from `_internal`; for the
+portable build, `ffmpeg` and `ffprobe` are expected to come from `_internal\app\bin` with
+runtime `source="bundled"`. The same `.ico` file is used both for the window runtime and for the
+embedded executable icon.
 
 ## Local start
 
@@ -126,7 +145,7 @@ Application start creates:
 - `runtime/queue_state.json` on first real queue save
 - `output/`
 - `temp/`
-- `app/bin/` as the bundled tools lookup root
+- `app/bin/` is the first local bundled-tools lookup root when present
 
 The persisted queue state stores both the `queue` payload and top-level `selected_item_id`. Each saved queue item keeps its own `mode`, `quality`, `selected_format_id`, and persisted probe snapshot so the same selection can be restored after restart. If the app restarts after an interrupted concurrent run, transient `running` items are normalized back to `queued` instead of staying stuck in an impossible active state.
 
@@ -237,5 +256,9 @@ The application resolves binaries in this order:
 3. `PATH`
 
 Within each bundled root the resolver probes `<root>/<tool>`, `<root>/bin/<tool>`, `<root>/ffmpeg/<tool>`, `<root>/ffmpeg/bin/<tool>`, and `<root>/win-x64/<tool>` with the platform executable suffix when needed.
+
+Portable Windows builds must ship `ffmpeg` and `ffprobe` through that bundled path. The canonical
+build script refuses to emit a portable artifact unless both tools are staged into the PyInstaller
+payload first, so packaged runtime snapshots should report `source="bundled"` instead of `path`.
 
 If `ffmpeg` is missing, the download pipeline stops before downloading media and writes a user-facing blocker into `QueueItem.error_message` instead of surfacing a stack trace. `ffprobe` is reused for smoke inspection when available.
