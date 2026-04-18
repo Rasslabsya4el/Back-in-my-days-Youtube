@@ -10,6 +10,7 @@ _ARTWORK_SUFFIX_BY_CONTENT_TYPE = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+AUDIO_ARTWORK_TARGET_SIZE = 720
 
 
 @dataclass(slots=True, frozen=True)
@@ -48,6 +49,14 @@ def download_artwork(artwork_url: str, *, working_dir: Path) -> Path | None:
     artwork_path = working_dir / f"artwork{_pick_artwork_suffix(normalized, content_type)}"
     artwork_path.write_bytes(payload)
     return artwork_path
+
+
+def build_audio_artwork_cover_filter(*, size: int = AUDIO_ARTWORK_TARGET_SIZE) -> str:
+    normalized_size = max(1, int(size))
+    return (
+        f"scale={normalized_size}:{normalized_size}:force_original_aspect_ratio=increase,"
+        f"crop={normalized_size}:{normalized_size}"
+    )
 
 
 def _pick_artwork_suffix(artwork_url: str, content_type: str) -> str:
