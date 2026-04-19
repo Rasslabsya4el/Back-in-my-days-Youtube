@@ -45,6 +45,15 @@ If Windows SmartScreen appears, click `More info`, then `Run anyway`.
 - Issues: [github.com/Rasslabsya4el/Back-in-my-days-Youtube/issues](https://github.com/Rasslabsya4el/Back-in-my-days-Youtube/issues)
 - If the app itself fails to start, the installer build writes a log to `C:\ProgramData\Back in my days Youtube\logs\debug.log`.
 
+## Why is the installer so large
+
+The installer is intentionally heavier than the UI alone.
+Most of the size comes from the bundled runtime pieces the app needs to start cleanly on Windows, especially the built-in WebView2 runtime and the bundled media tools.
+
+I made that tradeoff because I want the app to be as close as possible to "download, install, run" on any Windows PC without asking you to install extra dependencies first or relying on whatever old version happens to already be on the machine.
+
+That same reason is why the installed app also takes more space than the interface itself would suggest.
+
 ## Technical runbook
 
 Build, packaging, local start, smoke checks, and runtime notes live in [docs/technical-runbook.md](docs/technical-runbook.md).
