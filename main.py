@@ -11,23 +11,36 @@ import threading
 import time
 from pathlib import Path
 
+from app.debug_logging import (
+    active_debug_log_path,
+    bootstrap_debug_logging,
+    build_startup_error_message,
+    log_exception,
+    show_fatal_error_dialog,
+)
+
+_BOOTSTRAP_DEBUG_LOG_PATH = bootstrap_debug_logging()
+
 from app.bridge import AppBridgeApi, BridgeHostError, PywebviewHost
 from app.config import AppConfig, create_default_config
 from app.controller import AppController
 from app.core import DownloadPipelineError, MediaPostprocessError, YoutubeProbeError
 from app.models import DownloadMode, FormatOption, JobStatus, JobStep, ProbeResult, QueueItem
+from app.paths import APP_NAME, is_frozen
 
 
 SMOKE_INSPECTION_OK = "ok"
 SMOKE_INSPECTION_UNAVAILABLE = "ffprobe_unavailable"
 SMOKE_INSPECTION_FAILED = "failed"
+UI_HARNESS_CONFIG_ENV = "BACK_IN_MY_DAYS_YOUTUBE_UI_HARNESS_CONFIG"
+WINDOWS_AUDIO_ART_PROOF_CONFIG_ENV = "BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_AUDIO_ART_PROOF_CONFIG"
 SMOKE_INSPECTION_UNAVAILABLE_MESSAGE = (
     "Output inspection is unavailable because ffprobe is not available."
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="YT Downloader app shell")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} app shell")
     parser.add_argument(
         "--ui-shell",
         choices=("tk", "bridge"),
@@ -905,8 +918,8 @@ def _load_live_windows_audio_art_helper():
 def run_bridge_shell(*, start_url: str | None, debug: bool) -> int:
     controller = AppController(create_default_config())
     bridge = AppBridgeApi(controller)
-    harness_config_path = os.environ.get("YT_UI_HARNESS_CONFIG", "").strip()
-    live_windows_art_config_path = os.environ.get("YT_WINDOWS_AUDIO_ART_PROOF_CONFIG", "").strip()
+    harness_config_path = os.environ.get(UI_HARNESS_CONFIG_ENV, "").strip()
+    live_windows_art_config_path = os.environ.get(WINDOWS_AUDIO_ART_PROOF_CONFIG_ENV, "").strip()
     if harness_config_path:
         helper = _load_live_ui_harness_helper()
         return int(
@@ -948,6 +961,8 @@ def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
                 "bridge_host_smoke=ok",
                 f"pywebview_version={environment.pywebview_version!r}",
                 f"module_path={environment.module_path!r}",
+                f"webview2_runtime_source={environment.webview2_runtime_source!r}",
+                f"webview2_runtime_path={environment.webview2_runtime_path!r}",
                 f"entrypoint={launch_target.kind!r}",
                 f"entrypoint_value={launch_target.value!r}",
                 "startup_path=entered",
@@ -958,8 +973,23 @@ def run_smoke_bridge_host(*, start_url: str | None = None) -> None:
 
 
 def _bridge_host_blocked(error: BridgeHostError) -> int:
-    print(f"bridge_host=blocked message={error}", file=sys.stderr)
+    print(
+        f"bridge_host=blocked message={error} debug_log={active_debug_log_path()}",
+        file=sys.stderr,
+    )
     return error.exit_code
+
+
+def _should_show_fatal_dialog() -> bool:
+    if not is_frozen():
+        return False
+    if any(argument.startswith("--smoke") for argument in sys.argv[1:]):
+        return False
+    if os.environ.get(UI_HARNESS_CONFIG_ENV, "").strip():
+        return False
+    if os.environ.get(WINDOWS_AUDIO_ART_PROOF_CONFIG_ENV, "").strip():
+        return False
+    return True
 
 
 def main() -> int:
@@ -1017,6 +1047,8 @@ def main() -> int:
         try:
             return run_bridge_shell(start_url=args.bridge_start_url, debug=args.bridge_debug)
         except BridgeHostError as error:
+            if _should_show_fatal_dialog():
+                show_fatal_error_dialog(build_startup_error_message(str(error)))
             return _bridge_host_blocked(error)
 
     from app.shell import AppShell
@@ -1027,4 +1059,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as error:
+        log_exception("Fatal unhandled exception during application startup.")
+        if _should_show_fatal_dialog():
+            show_fatal_error_dialog(build_startup_error_message(str(error)))
+        raise

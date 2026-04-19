@@ -633,7 +633,7 @@ def main() -> int:
 
     try:
         env = os.environ.copy()
-        env["YT_WINDOWS_AUDIO_ART_PROOF_CONFIG"] = str(CONFIG_PATH)
+        env["BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_AUDIO_ART_PROOF_CONFIG"] = str(CONFIG_PATH)
         with MAIN_STDOUT_LOG.open("w", encoding="utf-8") as stdout_file, MAIN_STDERR_LOG.open(
             "w", encoding="utf-8"
         ) as stderr_file:

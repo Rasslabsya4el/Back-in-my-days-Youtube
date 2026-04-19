@@ -119,10 +119,13 @@ class SelectionState:
 @dataclass(slots=True, frozen=True)
 class RuntimeSnapshot:
     project_root: str
+    resource_project_root: str
     runtime_dir: str
     output_dir: str
     temp_dir: str
     state_file: str
+    debug_log_path: str
+    installed_build: bool
     queue_items_loaded: int
     ffmpeg: ToolStatus
     ffprobe: ToolStatus

@@ -13,6 +13,7 @@ from ..controller import AppController, AppState
 from ..controller.contracts import to_json_safe_payload
 from ..core import DownloadPipelineError, MediaPostprocessError, YoutubeProbeError
 from ..models import DownloadMode
+from ..paths import resolve_webview2_runtime_dir
 
 BRIDGE_API_VERSION = "bridge.v1"
 DEFAULT_EVENT_HISTORY = 64
@@ -256,6 +257,7 @@ class AppBridgeApi:
         state = self._latest_state_copy()
         active_download_item_ids = self._active_download_item_ids_copy()
         active_downloads = self._active_downloads_copy()
+        webview2_runtime_source, webview2_runtime_path = resolve_webview2_runtime_dir()
         return self._response(
             data={
                 "runtime": deepcopy(state.get("runtime", {})),
@@ -282,6 +284,10 @@ class AppBridgeApi:
                     "shells": {
                         "tkinter_fallback": True,
                         "pywebview_bootstrap": True,
+                        "webview2_runtime": {
+                            "source": webview2_runtime_source or "system",
+                            "path": str(webview2_runtime_path) if webview2_runtime_path else "",
+                        },
                     },
                 },
             },

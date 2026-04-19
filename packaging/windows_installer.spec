@@ -5,10 +5,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 APP_NAME = "Back in my days Youtube"
+DIST_NAME = "Back in my days Youtube Installer Payload"
 ENTRY_SCRIPT = PROJECT_ROOT / "main.py"
 ICON_PATH = PROJECT_ROOT / "app" / "assets" / "icons" / "back-in-my-days-youtube.ico"
 MEDIA_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT"
-WEBVIEW2_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_WEBVIEW2_STAGING_ROOT"
+WEBVIEW2_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_INSTALLER_WEBVIEW2_STAGING_ROOT"
 
 
 def _tool_candidates(name: str) -> tuple[Path, ...]:
@@ -34,8 +35,8 @@ def _require_staged_media_tools() -> Path:
     staging_root_value = os.environ.get(MEDIA_STAGING_ROOT_ENV, "").strip()
     if not staging_root_value:
         raise SystemExit(
-            "Portable Windows build requires staged media tools. "
-            f"Set {MEDIA_STAGING_ROOT_ENV} via scripts/build_windows_portable.ps1."
+            "Windows installer build requires staged media tools. "
+            f"Set {MEDIA_STAGING_ROOT_ENV} via scripts/build_windows_installer.ps1."
         )
 
     staging_root = Path(staging_root_value).expanduser().resolve()
@@ -43,7 +44,7 @@ def _require_staged_media_tools() -> Path:
     if not staged_tools_dir.is_dir():
         raise SystemExit(
             f"Staged media-tools root is missing: {staged_tools_dir}. "
-            "Run scripts/build_windows_portable.ps1 to prepare the bundle."
+            "Run scripts/build_windows_installer.ps1 to prepare the bundle."
         )
 
     missing_tools = [
@@ -53,7 +54,7 @@ def _require_staged_media_tools() -> Path:
     ]
     if missing_tools:
         raise SystemExit(
-            "Portable Windows build is missing bundled media tools after staging. "
+            "Windows installer build is missing bundled media tools after staging. "
             f"Missing: {', '.join(missing_tools)} under {staged_tools_dir}."
         )
     return staged_tools_dir
@@ -63,8 +64,8 @@ def _require_staged_webview2_runtime() -> Path:
     staging_root_value = os.environ.get(WEBVIEW2_STAGING_ROOT_ENV, "").strip()
     if not staging_root_value:
         raise SystemExit(
-            "Portable Windows build requires a staged fixed WebView2 Runtime. "
-            f"Set {WEBVIEW2_STAGING_ROOT_ENV} via scripts/build_windows_portable.ps1."
+            "Windows installer build requires a staged fixed WebView2 Runtime. "
+            f"Set {WEBVIEW2_STAGING_ROOT_ENV} via scripts/build_windows_installer.ps1."
         )
 
     staging_root = Path(staging_root_value).expanduser().resolve()
@@ -73,7 +74,7 @@ def _require_staged_webview2_runtime() -> Path:
     if not browser_executable.is_file():
         raise SystemExit(
             f"Staged fixed WebView2 Runtime is missing: {browser_executable}. "
-            "Run scripts/build_windows_portable.ps1 to prepare the bundle."
+            "Run scripts/build_windows_installer.ps1 to prepare the bundle."
         )
     return staged_runtime_dir
 
@@ -137,5 +138,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name=APP_NAME,
+    name=DIST_NAME,
 )

@@ -12,7 +12,7 @@ class AppShell:
     def __init__(self, controller: AppController) -> None:
         self.controller = controller
         self.root = tk.Tk()
-        self.root.title("YT Downloader v1")
+        self.root.title("Back in my days Youtube v1")
         self.root.geometry("980x700")
         self.root.minsize(880, 620)
         window_icon = icon_path()
@@ -46,7 +46,7 @@ class AppShell:
 
         title = ttk.Label(
             frame,
-            text="YT Downloader v1 shell",
+            text="Back in my days Youtube v1 shell",
             font=("Segoe UI", 18, "bold"),
         )
         title.grid(row=0, column=0, columnspan=2, sticky="w")

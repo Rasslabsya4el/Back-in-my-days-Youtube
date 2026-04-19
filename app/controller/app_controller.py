@@ -7,8 +7,10 @@ from pathlib import Path
 
 from ..config import AppConfig
 from ..core import DownloadPipelineError, QueueItemDownloader, YoutubeProbeError, YoutubeProbeService
+from ..debug_logging import active_debug_log_path
 from ..ffmpeg import MediaToolResolver
 from ..models import DownloadMode, FormatOption, JobStatus, JobStep, ProbeErrorCode, ProbeResult, QueueItem
+from ..paths import is_installed_build
 from ..state_store import QueueStateStore
 from .contracts import AppState, QueueItemSnapshot, RuntimeSnapshot, SelectionState, ToolStatus
 
@@ -342,10 +344,13 @@ class AppController:
     def _build_runtime_snapshot_locked(self) -> RuntimeSnapshot:
         return RuntimeSnapshot(
             project_root=str(self.config.project_root),
+            resource_project_root=str(self.config.resource_project_root),
             runtime_dir=str(self.config.runtime_dir),
             output_dir=str(self._session_output_dir),
             temp_dir=str(self.config.temp_dir),
             state_file=str(self.config.state_file),
+            debug_log_path=str(active_debug_log_path()),
+            installed_build=is_installed_build(),
             queue_items_loaded=len(self._items),
             ffmpeg=ToolStatus.from_resolution(self.tool_resolver.resolve_ffmpeg()),
             ffprobe=ToolStatus.from_resolution(self.tool_resolver.resolve_ffprobe()),

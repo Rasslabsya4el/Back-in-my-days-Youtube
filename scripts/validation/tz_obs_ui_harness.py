@@ -21,7 +21,7 @@ from app.models import DownloadMode, FormatOption, JobStatus, JobStep, ProbeResu
 
 
 TASK_ID = "TZ-OBS-UI-HARNESS-01"
-WINDOW_TITLE = "YT Downloader bridge shell"
+WINDOW_TITLE = "Back in my days Youtube bridge shell"
 DEFAULT_RUNS = 2
 
 
@@ -122,7 +122,7 @@ def _run_single_session(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     env = os.environ.copy()
-    env["YT_UI_HARNESS_CONFIG"] = str(config_path)
+    env["BACK_IN_MY_DAYS_YOUTUBE_UI_HARNESS_CONFIG"] = str(config_path)
     stdout_path = run_dir / "main.stdout.log"
     stderr_path = run_dir / "main.stderr.log"
     command = ["poetry", "run", "python", "main.py", "--ui-shell", "bridge"]

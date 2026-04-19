@@ -52,7 +52,7 @@ export class BridgeClientError extends Error {
 
 class BridgeClient {
   async waitUntilReady(timeoutMs = BRIDGE_READY_TIMEOUT_MS): Promise<void> {
-    await this.resolveApi(timeoutMs);
+    await this.resolveMethod("get_app_state", timeoutMs);
   }
 
   getAppState(payload?: { since_event_id?: number } | number | string) {
@@ -117,14 +117,7 @@ class BridgeClient {
     methodName: BridgeMethodName,
     payload?: unknown,
   ): Promise<BridgeResponse<TData>> {
-    const api = await this.resolveApi();
-    const method = api[methodName] as (payload?: unknown) => Promise<unknown>;
-    if (typeof method !== "function") {
-      throw new BridgeClientError(
-        `Bridge method ${methodName} is not exposed by pywebview.`,
-      );
-    }
-
+    const method = await this.resolveMethod(methodName);
     return method(payload) as Promise<BridgeResponse<TData>>;
   }
 
@@ -167,6 +160,32 @@ class BridgeClient {
 
       window.addEventListener(PYWEBVIEW_READY_EVENT, onReady);
     });
+  }
+
+  private async resolveMethod(
+    methodName: BridgeMethodName,
+    timeoutMs = BRIDGE_READY_TIMEOUT_MS,
+  ): Promise<(payload?: unknown) => Promise<unknown>> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (true) {
+      const api = await this.resolveApi(Math.max(deadline - Date.now(), 1));
+      const method = api[methodName] as ((payload?: unknown) => Promise<unknown>) | undefined;
+      if (typeof method === "function") {
+        return method;
+      }
+
+      if (Date.now() >= deadline) {
+        const exposedMethods = Object.keys(api).sort();
+        throw new BridgeClientError(
+          exposedMethods.length
+            ? `Bridge method ${methodName} is not exposed by pywebview. Available methods: ${exposedMethods.join(", ")}`
+            : `Bridge method ${methodName} is not exposed by pywebview. The bridge API object is present but still empty.`,
+        );
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
   }
 }
 

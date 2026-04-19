@@ -9,7 +9,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STAGING_ROOT = PROJECT_ROOT / "build" / "portable-media-tools"
-SOURCE_ENV_VAR = "YT_PORTABLE_MEDIA_TOOLS_DIR"
+SOURCE_ENV_VAR = "BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR"
 
 
 def _tool_candidates(name: str) -> tuple[Path, ...]:

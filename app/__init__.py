@@ -1,4 +1,4 @@
-"""YT Downloader application package."""
+"""Back in my days Youtube application package."""
 
 from typing import TYPE_CHECKING, Any
 

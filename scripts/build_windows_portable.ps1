@@ -7,10 +7,13 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $specPath = Join-Path $repoRoot "packaging\\windows_portable.spec"
 $mediaToolsPrepScript = Join-Path $repoRoot "scripts\\prepare_windows_portable_media_tools.py"
+$webView2PrepScript = Join-Path $repoRoot "scripts\\prepare_windows_portable_webview2_runtime.py"
 $mediaToolsStagingRoot = Join-Path $repoRoot "build\\portable-media-tools"
-$artifactRoot = Join-Path $repoRoot "dist\\YT Downloader"
-$artifactExe = Join-Path $artifactRoot "YT Downloader.exe"
-$previousPortableMediaStagingRoot = $env:YT_PORTABLE_MEDIA_STAGING_ROOT
+$webView2StagingRoot = Join-Path $repoRoot "build\\portable-webview2-runtime"
+$artifactRoot = Join-Path $repoRoot "dist\\Back in my days Youtube"
+$artifactExe = Join-Path $artifactRoot "Back in my days Youtube.exe"
+$previousPortableMediaStagingRoot = $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT
+$previousPortableWebView2StagingRoot = $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_WEBVIEW2_STAGING_ROOT
 
 Push-Location $repoRoot
 try {
@@ -21,9 +24,15 @@ try {
 
     poetry run python $mediaToolsPrepScript --staging-root $mediaToolsStagingRoot
     if ($LASTEXITCODE -ne 0) {
-        throw "Portable media-tools staging failed. Prepare YT_PORTABLE_MEDIA_TOOLS_DIR before building the portable artifact."
+        throw "Portable media-tools staging failed. Prepare BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR before building the portable artifact."
     }
-    $env:YT_PORTABLE_MEDIA_STAGING_ROOT = $mediaToolsStagingRoot
+    $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT = $mediaToolsStagingRoot
+
+    poetry run python $webView2PrepScript --staging-root $webView2StagingRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Portable WebView2 runtime staging failed."
+    }
+    $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_WEBVIEW2_STAGING_ROOT = $webView2StagingRoot
 
     npm run build
     if ($LASTEXITCODE -ne 0) {
@@ -42,13 +51,20 @@ try {
     Write-Host "ArtifactRoot=$artifactRoot"
     Write-Host "ArtifactExe=$artifactExe"
     Write-Host "PortableMediaToolsStagingRoot=$mediaToolsStagingRoot"
+    Write-Host "PortableWebView2StagingRoot=$webView2StagingRoot"
 }
 finally {
     if ($null -ne $previousPortableMediaStagingRoot) {
-        $env:YT_PORTABLE_MEDIA_STAGING_ROOT = $previousPortableMediaStagingRoot
+        $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT = $previousPortableMediaStagingRoot
     }
     else {
-        Remove-Item Env:YT_PORTABLE_MEDIA_STAGING_ROOT -ErrorAction SilentlyContinue
+        Remove-Item Env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $previousPortableWebView2StagingRoot) {
+        $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_WEBVIEW2_STAGING_ROOT = $previousPortableWebView2StagingRoot
+    }
+    else {
+        Remove-Item Env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_WEBVIEW2_STAGING_ROOT -ErrorAction SilentlyContinue
     }
     Pop-Location
 }

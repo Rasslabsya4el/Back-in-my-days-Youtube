@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import app_root, resource_project_root
+from .paths import resource_project_root, writable_app_root
 
 
 @dataclass(slots=True, frozen=True)
@@ -31,7 +31,7 @@ class AppConfig:
 
 
 def create_default_config(project_root: Path | None = None) -> AppConfig:
-    writable_root = project_root or app_root()
+    writable_root = project_root or writable_app_root()
     resource_root = resource_project_root()
     runtime_dir = writable_root / "runtime"
     output_dir = writable_root / "output"

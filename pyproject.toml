@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "yt-downloader"
+name = "back-in-my-days-youtube"
 version = "0.1.0"
 description = "Desktop shell for probing YouTube metadata and media qualities."
 readme = "README.md"

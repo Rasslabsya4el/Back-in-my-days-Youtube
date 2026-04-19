@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import importlib.metadata
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
 from .api import AppBridgeApi
-from ..paths import frontend_dist_dir, icon_path
+from ..paths import APP_NAME, LOGGER_NAMESPACE, frontend_dist_dir, icon_path, resolve_webview2_runtime_dir
 
 DEFAULT_BRIDGE_HTML = """\
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>YT Downloader bridge shell</title>
+    <title>Back in my days Youtube bridge shell</title>
     <style>
       :root {
         color-scheme: light;
@@ -138,6 +139,8 @@ class BridgeHostStartupError(BridgeHostError):
 class BridgeHostEnvironment:
     pywebview_version: str
     module_path: str
+    webview2_runtime_path: str
+    webview2_runtime_source: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -147,13 +150,14 @@ class BridgeLaunchTarget:
 
 
 class PywebviewHost:
-    title = "YT Downloader bridge shell"
+    title = f"{APP_NAME} bridge shell"
 
     def __init__(self, bridge_api: AppBridgeApi) -> None:
         self.bridge_api = bridge_api
 
     def probe_environment(self) -> BridgeHostEnvironment:
         webview = self._load_webview()
+        webview2_runtime_source, webview2_runtime_path = resolve_webview2_runtime_dir()
         try:
             pywebview_version = importlib.metadata.version("pywebview")
         except importlib.metadata.PackageNotFoundError:
@@ -161,6 +165,8 @@ class PywebviewHost:
         return BridgeHostEnvironment(
             pywebview_version=pywebview_version,
             module_path=getattr(webview, "__file__", "") or "",
+            webview2_runtime_path=str(webview2_runtime_path) if webview2_runtime_path else "",
+            webview2_runtime_source=webview2_runtime_source or "system",
         )
 
     def resolve_launch_target(self, *, start_url: str | None = None) -> BridgeLaunchTarget:
@@ -184,7 +190,16 @@ class PywebviewHost:
         try:
             environment = self.probe_environment()
             webview = self._load_webview()
+            self._configure_webview_runtime(webview, environment)
             launch_target = self.resolve_launch_target(start_url=start_url)
+            logging.getLogger(f"{LOGGER_NAMESPACE}.bridge").info(
+                "Starting pywebview host target_kind=%r target_value=%r runtime_source=%r runtime_path=%r auto_close_after=%r",
+                launch_target.kind,
+                launch_target.value,
+                environment.webview2_runtime_source,
+                environment.webview2_runtime_path,
+                auto_close_after,
+            )
             window_kwargs = {
                 "js_api": self.bridge_api,
                 "width": 1180,
@@ -219,6 +234,12 @@ class PywebviewHost:
         except BridgeHostError:
             raise
         except Exception as error:  # pragma: no cover - real GUI backend failures are environment-specific
+            logging.getLogger(f"{LOGGER_NAMESPACE}.bridge").exception(
+                "pywebview host startup failed start_url=%r debug=%r auto_close_after=%r",
+                start_url,
+                debug,
+                auto_close_after,
+            )
             raise BridgeHostStartupError(
                 "pywebview is installed, but the desktop host could not start in this environment."
             ) from error
@@ -251,3 +272,10 @@ class PywebviewHost:
         if packaged_icon is not None:
             return str(packaged_icon)
         return None
+
+    @staticmethod
+    def _configure_webview_runtime(webview: ModuleType, environment: BridgeHostEnvironment) -> None:
+        settings = getattr(webview, "settings", None)
+        if not isinstance(settings, dict):
+            return
+        settings["WEBVIEW2_RUNTIME_PATH"] = environment.webview2_runtime_path or None
