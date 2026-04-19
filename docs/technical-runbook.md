@@ -1,124 +1,92 @@
 # Technical runbook
 
-Build, packaging, local start, smoke checks, and bridge/runtime notes were moved here from the repository landing page.
+This file is for building, packaging, and validating the app.
+The user-facing overview stays in [README.md](../README.md).
 
-## UI/runtime stack v1
+## Stack
 
 - Python 3.12
-- React + TypeScript + Vite for the primary desktop-shell UI surface
-- Tkinter as a fallback diagnostic shell over the same UI-agnostic Python controller layer
-- `pywebview` in the Poetry environment for the desktop shell host
-- a JSON-safe Python bridge consumed by both shells
-- `yt-dlp` for YouTube metadata and formats probing
-- stdlib (`dataclasses`, `enum`, `json`, `pathlib`) for config and queue state
+- Poetry for Python dependencies
+- React + TypeScript + Vite for the main desktop UI
+- `pywebview` for the desktop host
+- Tkinter as a fallback diagnostic shell
+- `yt-dlp` for probing and downloading media
+- `ffmpeg` / `ffprobe` for post-processing and inspection
 
-## Poetry bootstrap
+## Bootstrap
 
-1. Ensure Python 3.12.x and Poetry are installed.
-2. Install the locked environment:
+Install Python dependencies:
 
 ```powershell
 poetry install
 ```
 
-Poetry is the source of truth for Python dependencies in this repository. `pyproject.toml` declares them and `poetry.lock` pins the resolved set.
-`poetry install` also brings in `pywebview` for the bridge host.
-
-## Frontend bootstrap
-
-Install the frontend workspace once from the repository root:
+Install the frontend dependencies from the repository root:
 
 ```powershell
 npm install
 ```
 
-Run the Vite dev server:
-
-```powershell
-npm run dev
-```
-
-Build the React shell into `frontend/dist`:
+Build the frontend shell into `frontend/dist`:
 
 ```powershell
 npm run build
 ```
 
-## Windows packaging
+## Supported Windows release path
 
-Bootstrap the packaging toolchain once:
+The supported public Windows release is the installer.
+
+Build it with:
 
 ```powershell
 poetry install --with packaging
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_installer.ps1
 ```
 
-Canonical portable build command:
+The build expects `BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR` to point at an FFmpeg bundle root that contains both `ffmpeg.exe` and `ffprobe.exe`.
+Supported layouts under that root are:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
-```
-
-Before running the command, set `BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR` to an explicit FFmpeg bundle root.
-The root must contain both `ffmpeg.exe` and `ffprobe.exe` in one of the supported layouts relative
-to that root: `<root>\<tool>.exe`, `<root>\bin\<tool>.exe`, `<root>\ffmpeg\<tool>.exe`,
-`<root>\ffmpeg\bin\<tool>.exe`, or `<root>\win-x64\<tool>.exe`.
+- `<root>\<tool>.exe`
+- `<root>\bin\<tool>.exe`
+- `<root>\ffmpeg\<tool>.exe`
+- `<root>\ffmpeg\bin\<tool>.exe`
+- `<root>\win-x64\<tool>.exe`
 
 Example:
 
 ```powershell
 $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR = 'C:\tools\ffmpeg-8.1-essentials_build'
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_portable.ps1
-```
-
-This produces a portable `onedir` release at `dist\Back in my days Youtube\`. The final executable is
-`dist\Back in my days Youtube\Back in my days Youtube.exe`.
-
-Canonical installer build command:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_installer.ps1
 ```
 
-The installer build uses the same explicit `BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR` contract for bundled
-`ffmpeg`/`ffprobe`, and it also stages a bundled fixed `WebView2 Runtime` directly into the
-installed payload. The result is `dist\Back in my days Youtube Setup.exe`.
+The final installer is:
 
-For GitHub Releases, upload the portable artifact as a ZIP that keeps the top-level `Back in my days Youtube\`
-folder intact so testers can extract and run it without rebuilding from source.
+```text
+dist\Back in my days Youtube Setup.exe
+```
 
-The build script stages that explicit payload under `build\portable-media-tools\app\bin\` and
-passes it into PyInstaller as bundled media tools. If `BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_TOOLS_DIR` is missing,
-or the root does not contain both `ffmpeg` and `ffprobe`, the build fails before the frontend or
-PyInstaller steps. A portable artifact is not allowed to fall back to system `PATH`.
+The installer payload bundles:
 
-The same build command also stages a fixed Microsoft `WebView2 Runtime` under
-`build\portable-webview2-runtime\` by resolving the latest official Windows x64 fixed-runtime CAB
-from the Microsoft Edge WebView2 download page. The packaged app points `pywebview` at that bundled
-runtime under `_internal\webview2-fixed-runtime`, so the target PC does not need a separately
-installed machine-wide `WebView2 Runtime`.
+- `frontend/dist`
+- app icons and assets
+- bundled `ffmpeg` and `ffprobe`
+- a fixed `WebView2 Runtime`
 
-PyInstaller keeps bundled resources under `dist\Back in my days Youtube\_internal\`. The packaged app
-resolves `frontend/dist` and `app/assets` from that frozen resource root, while writable
-`runtime/`, `output/`, and `temp/` directories stay next to the executable in the portable folder.
-Bundled tool roots (`app/bin`, `tools`, `vendor`) are also resolved from `_internal`; for the
-portable build, `ffmpeg` and `ffprobe` are expected to come from `_internal\app\bin` with
-runtime `source="bundled"`. The same `.ico` file is used both for the window runtime and for the
-embedded executable icon.
+## Portable scripts
+
+Portable build scripts still exist in the repo for internal packaging work, but portable is not the supported public release format right now.
+Do not point end users at the portable flow unless that decision changes.
 
 ## Local start
 
-Run the desktop shell:
+Start the desktop shell:
 
 ```powershell
 poetry run python main.py
 ```
 
-The bridge host resolves its launch target in this order:
-1. `--bridge-start-url`, when provided for `--ui-shell bridge` or `--smoke-bridge-host`
-2. `frontend/dist/index.html`, when the build exists
-3. a lightweight inline HTML fallback with build instructions plus an optional debug details section
-
-Run the bridge shell explicitly:
+Start the bridge shell explicitly:
 
 ```powershell
 poetry run python main.py --ui-shell bridge
@@ -130,97 +98,81 @@ Point the bridge shell at a Vite dev server instead of built assets:
 poetry run python main.py --ui-shell bridge --bridge-start-url http://localhost:5173
 ```
 
-Run the Tk diagnostic shell explicitly:
+Start the Tk diagnostic shell:
 
 ```powershell
 poetry run python main.py --ui-shell tk
 ```
 
-If the local `pywebview` backend cannot start, the command exits cleanly with `bridge_host=blocked ...` on stderr and exit code `2` instead of printing a traceback.
+Bridge launch target order:
 
-After you paste a YouTube URL into the shell and add it to the queue, the bridge shell keeps the primary screen focused on the user flow:
+1. `--bridge-start-url`, if provided
+2. `frontend/dist/index.html`, if the build exists
+3. a small inline fallback page with build instructions
 
-- intake URL
-- output folder picker for the current app session
-- current item with `Quality` and `File format` selectors
-- queue selection
-- start one item or `Download all queued`
-- status, error, and output path surface
+If `pywebview` cannot start, the command exits with `bridge_host=blocked ...` and exit code `2` instead of dumping a traceback into the UI path.
 
-`Start download` runs a real pipeline:
+## UI behavior
 
-- `yt-dlp` downloads the saved selection into `temp/<queue-item-id>/`
-- `ffmpeg` merges or converts the media into a deterministic final file in `output/`
-- final output contract is `video -> .mp4`, `audio -> .m4a`
+The main screen is built around one simple loop:
 
-The queue runtime is concurrent: multiple queued items can be started together, the bridge keeps separate worker threads per queue item, and the shell can show multiple `running` items at the same time. Output-path reservation happens before each run so two concurrent items with the same title do not overwrite each other.
+1. paste a YouTube URL
+2. add it to the queue
+3. choose the output folder for the current session
+4. select the queue item you want to work on
+5. choose `Audio` or `Video`
+6. choose quality
+7. start one item or the whole queue
 
-The orchestration and state mutations live in `app/controller/`. `app/shell.py` only binds controller state to Tkinter widgets, `frontend/` renders the first React shell iteration, and `app/bridge/` exposes the same controller via JSON-safe payloads for `pywebview` JS calls, so the backend stays reusable across both shells.
+The queue can run items concurrently.
+If two items would produce the same output name, the app reserves output paths before each run so they do not overwrite each other.
 
-For video items, saved muxed formats are remuxed/transcoded into `mp4`. Saved video-only formats automatically pull the best saved companion audio format from the persisted probe state and merge both streams.
+Final file contract:
 
-For audio-only items, the pipeline creates final `.m4a` output with embedded `title`/`artist` metadata and attempts to attach the YouTube thumbnail as cover art. Missing `channel` or thumbnail data does not fail the pipeline.
+- video -> `.mp4`
+- audio -> `.m4a`
 
-Application start creates:
+Audio output keeps `title` and `artist` metadata.
+The app also tries to embed the YouTube thumbnail as cover art when that data is available.
 
-- `runtime/queue_state.json` on first real queue save
-- `output/`
-- `temp/`
-- `app/bin/` is the first local bundled-tools lookup root when present
+## Runtime layout
 
-The persisted queue state stores both the `queue` payload and top-level `selected_item_id`. Each saved queue item keeps its own `mode`, `quality`, `selected_format_id`, and persisted probe snapshot so the same selection can be restored after restart. If the app restarts after an interrupted concurrent run, transient `running` items are normalized back to `queued` instead of staying stuck in an impossible active state.
+Installer builds write user data under `%LOCALAPPDATA%\Back in my days Youtube`.
+
+Important paths:
+
+- output: `%LOCALAPPDATA%\Back in my days Youtube\output`
+- runtime state: `%LOCALAPPDATA%\Back in my days Youtube\runtime`
+- temp work: `%LOCALAPPDATA%\Back in my days Youtube\temp`
+- startup/install log: `C:\ProgramData\Back in my days Youtube\logs\debug.log`
+
+The installed app folder also contains `debug-log-path.txt`, which points at the active log file on that machine.
 
 ## Smoke checks
 
-Tk startup smoke:
+Startup smoke:
 
 ```powershell
 poetry run python main.py --smoke-start
 ```
 
-Queue state save/load smoke:
+Queue persistence smoke:
 
 ```powershell
 poetry run python main.py --smoke-state
 ```
 
-This smoke now proves a full restart contract for a temporary state file: selected queue item, `mode`, `quality`, and `selected_format_id` are saved, reloaded, and kept aligned between the active selection snapshot and the persisted queue item.
-
-Probe smoke without download:
+Probe smoke:
 
 ```powershell
 poetry run python main.py --smoke-probe https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
-poetry run python main.py --smoke-probe https://example.com/watch?v=123
-poetry run python main.py --smoke-probe https://www.youtube.com/watch?v=aaaaaaaaaaa
 ```
 
-UI intake smoke with immediate quality dropdown population:
-
-```powershell
-poetry run python main.py --smoke-intake https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
-```
-
-The state smokes write to `runtime/queue_state.smoke.json` and `runtime/queue_state.intake.smoke.json`.
-
-Headless bridge contract smoke:
+Bridge smoke:
 
 ```powershell
 poetry run python main.py --smoke-bridge https://www.youtube.com/watch?v=Lm7-yFZ5fZQ
 ```
-
-This smoke proves the bridge can:
-
-- build JSON-safe payloads without Python dataclass knowledge on the JS side
-- call `get_runtime_info`, `get_app_state`, `add_url`, `select_item`, `select_mode`, `select_quality`, `start_download`, and `inspect_output`
-- operate without importing `app.shell` on the backend path
-
-Deterministic bridge concurrency smoke with proof artifact:
-
-```powershell
-poetry run python main.py --smoke-bridge-concurrency
-```
-
-This smoke starts two queued items through `start_all_downloads`, waits for a real overlap window with two `running` items at once, and writes the captured bridge/runtime snapshots to `runtime/ui-proof/TZ-PIPE-CONCURRENCY-01/bridge-concurrency-proof.json`.
 
 Bridge host startup smoke:
 
@@ -228,27 +180,21 @@ Bridge host startup smoke:
 poetry run python main.py --smoke-bridge-host
 ```
 
-This smoke starts the actual `pywebview` host bootstrap, waits for startup, and auto-closes the window after a short probe. It uses the same launch-target resolution as the normal bridge shell: `--bridge-start-url` first, then `frontend/dist/index.html`, then the lightweight fallback HTML.
-
-Download smoke using a persisted queue item:
+Download smoke:
 
 ```powershell
-poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode video
 poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode audio
-poetry run python main.py --smoke-download https://www.youtube.com/watch?v=Lm7-yFZ5fZQ --smoke-download-mode video --smoke-download-format-id 299
 ```
 
-The third example forces a saved video-only format so the pipeline has to download separate streams and merge them.
-
-Compile sanity check:
+Compile sanity:
 
 ```powershell
 poetry run python -m py_compile app\__init__.py main.py app\shell.py app\bridge\__init__.py app\bridge\api.py app\bridge\host.py app\controller\__init__.py app\controller\app_controller.py app\controller\contracts.py app\core\__init__.py app\core\audio_metadata.py app\core\youtube_probe.py app\core\downloader.py app\core\postprocess.py
 ```
 
-## Bridge contract notes
+## Bridge notes
 
-The `pywebview` bridge exposes these Python methods for JS:
+The JS side calls these Python bridge methods:
 
 - `get_app_state`
 - `add_url`
@@ -256,33 +202,31 @@ The `pywebview` bridge exposes these Python methods for JS:
 - `select_mode`
 - `select_quality`
 - `pick_output_dir`
+- `open_output_dir`
+- `clear_queue`
 - `start_download`
 - `start_all_downloads`
 - `get_runtime_info`
 - `inspect_output`
 
-`frontend/src/bridge.ts` wraps these methods in a typed TS client. `get_app_state` is the refresh primitive: the React shell polls it with `since_event_id`. When the cursor has not advanced, the bridge returns `state_changed=false` with no full-state payload, so the shell can avoid redundant rerenders. The shell also pauses interval polling while the window is hidden and performs a one-shot refresh when focus returns.
+`frontend/src/bridge.ts` wraps them in a typed client.
+`get_app_state` is the refresh primitive. The UI polls it with `since_event_id`, so unchanged state does not trigger a full rerender payload every time.
 
-The React shell keeps format internals inside the bridge/frontend layer. The user sees separate `Quality` and `File format` dropdowns, while the saved `selected_format_id` contract still drives the Python pipeline under the hood.
+## ffmpeg / ffprobe resolution
 
-`start_download` and `start_all_downloads` are async in the bridge layer: they return immediate acceptance payloads, then the controller emits progress and status updates into the retained event queue while background workers are running. Bridge meta/runtime payloads expose aggregate activity through `download_active`, `active_download_count`, and `active_download_item_ids`.
-
-The React shell intentionally stays coarse in its progress surface: it renders queue-item statuses and steps, not simulated byte progress that the backend does not expose yet.
-
-The bridge shell bootstrap intentionally stays minimal. In the locked Poetry environment it should be runnable. If the local `pywebview` runtime or GUI backend is unavailable, `main.py --ui-shell bridge` fails fast with a short `bridge_host=blocked` message instead of silently falling back to Tkinter or surfacing a traceback.
-
-## ffmpeg / ffprobe resolution order
-
-The application resolves binaries in this order:
+Binary lookup order:
 
 1. `FFMPEG_PATH` / `FFPROBE_PATH`
-2. Bundled files under `app/bin/`, then `tools/`, then `vendor/`
+2. bundled files under `app/bin/`, then `tools/`, then `vendor/`
 3. `PATH`
 
-Within each bundled root the resolver probes `<root>/<tool>`, `<root>/bin/<tool>`, `<root>/ffmpeg/<tool>`, `<root>/ffmpeg/bin/<tool>`, and `<root>/win-x64/<tool>` with the platform executable suffix when needed.
+Within each bundled root the resolver probes:
 
-Portable Windows builds must ship `ffmpeg` and `ffprobe` through that bundled path. The canonical
-build script refuses to emit a portable artifact unless both tools are staged into the PyInstaller
-payload first, so packaged runtime snapshots should report `source="bundled"` instead of `path`.
+- `<root>/<tool>`
+- `<root>/bin/<tool>`
+- `<root>/ffmpeg/<tool>`
+- `<root>/ffmpeg/bin/<tool>`
+- `<root>/win-x64/<tool>`
 
-If `ffmpeg` is missing, the download pipeline stops before downloading media and writes a user-facing blocker into `QueueItem.error_message` instead of surfacing a stack trace. `ffprobe` is reused for smoke inspection when available.
+Installer packaging is supposed to end with bundled tools, not `PATH` fallbacks.
+If `ffmpeg` is missing, the app stops before the media run and surfaces a short user-facing error instead of a traceback.
