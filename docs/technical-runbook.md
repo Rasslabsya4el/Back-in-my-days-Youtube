@@ -11,6 +11,7 @@ The user-facing overview stays in [README.md](../README.md).
 - `pywebview` for the desktop host
 - Tkinter as a fallback diagnostic shell
 - `yt-dlp` for probing and downloading media
+- `yt-dlp-ejs` plus a bundled Node.js runtime for current YouTube JavaScript challenges
 - `ffmpeg` / `ffprobe` for post-processing and inspection
 
 ## Bootstrap
@@ -72,6 +73,11 @@ The installer payload bundles:
 - app icons and assets
 - bundled `ffmpeg` and `ffprobe`
 - a fixed `WebView2 Runtime`
+- Node.js runtime for yt-dlp YouTube extraction
+
+The build machine must have Node.js 22 or newer available as `node.exe`. The release
+copies only `node.exe` into the installer payload; end users do not need to install
+Node.js separately.
 
 ## Portable scripts
 
@@ -230,3 +236,10 @@ Within each bundled root the resolver probes:
 
 Installer packaging is supposed to end with bundled tools, not `PATH` fallbacks.
 If `ffmpeg` is missing, the app stops before the media run and surfaces a short user-facing error instead of a traceback.
+
+## YouTube download recovery
+
+The app refreshes YouTube extraction for every format attempt and retries the saved
+format before falling back through the other compatible audio/video formats from the
+probe result. This matters because YouTube media URLs can be rejected after probing
+with HTTP 403. A retry no longer repeats only the same stale request.

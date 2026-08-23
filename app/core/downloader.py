@@ -16,6 +16,7 @@ from ..models import DownloadMode, FormatOption, JobStatus, JobStep, QueueItem
 from .audio_metadata import AudioMetadata
 from .postprocess import MediaPostProcessor, MediaPostprocessError
 from .stage_scheduler import DownloadStageScheduler
+from .ytdlp_options import build_ytdlp_options
 
 
 class DownloadPipelineError(Exception):
@@ -58,10 +59,13 @@ class QueueItemDownloader:
         self,
         config: AppConfig,
         tool_resolver: MediaToolResolver | None = None,
+        *,
+        js_runtime_path: Path | None = None,
     ) -> None:
         self.config = config
         self.tool_resolver = tool_resolver or MediaToolResolver(config)
         self.stage_scheduler = DownloadStageScheduler()
+        self.js_runtime_path = js_runtime_path
 
     def execute(
         self,
@@ -94,7 +98,12 @@ class QueueItemDownloader:
                 detail=self._download_detail(plan),
                 on_update=on_update,
             )
-            downloaded = self._download_selected_media(item, plan, temp_dir)
+            downloaded = self._download_selected_media(
+                item,
+                plan,
+                temp_dir,
+                on_update=on_update,
+            )
 
             self._set_state(
                 item,
@@ -248,28 +257,130 @@ class QueueItemDownloader:
         item: QueueItem,
         plan: DownloadPlan,
         temp_dir: Path,
+        *,
+        on_update: Callable[[QueueItem], None] | None = None,
     ) -> DownloadedMedia:
         if item.mode == DownloadMode.AUDIO:
-            audio_path = self._download_format(
-                source_url=item.source_url,
-                format_id=plan.audio_format_id,
+            audio_path = self._download_audio_with_fallback(
+                item=item,
+                plan=plan,
                 temp_dir=temp_dir,
+                on_update=on_update,
             )
             return DownloadedMedia(audio_path=audio_path)
 
-        video_path = self._download_format(
-            source_url=item.source_url,
-            format_id=plan.video_format_id,
+        return self._download_video_with_fallback(
+            item=item,
+            plan=plan,
             temp_dir=temp_dir,
+            on_update=on_update,
         )
-        audio_path = None
-        if plan.audio_format_id:
-            audio_path = self._download_format(
-                source_url=item.source_url,
-                format_id=plan.audio_format_id,
-                temp_dir=temp_dir,
-            )
-        return DownloadedMedia(video_path=video_path, audio_path=audio_path)
+
+    def _download_audio_with_fallback(
+        self,
+        *,
+        item: QueueItem,
+        plan: DownloadPlan,
+        temp_dir: Path,
+        on_update: Callable[[QueueItem], None] | None,
+    ) -> Path:
+        options = item.probe.audio_formats if item.probe else []
+        format_ids = self._ordered_format_ids(preferred=plan.audio_format_id, options=options)
+        last_error: DownloadPipelineError | None = None
+        for attempt_index, format_id in enumerate(format_ids):
+            attempt_dir = temp_dir / f"audio-attempt-{attempt_index + 1}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            if attempt_index:
+                self._set_state(
+                    item,
+                    status=JobStatus.RUNNING,
+                    step=JobStep.DOWNLOADING,
+                    detail=f"Retrying with compatible audio format {format_id}.",
+                    on_update=on_update,
+                )
+            try:
+                return self._download_format(
+                    source_url=item.source_url,
+                    format_id=format_id,
+                    temp_dir=attempt_dir,
+                )
+            except DownloadPipelineError as error:
+                last_error = error
+                shutil.rmtree(attempt_dir, ignore_errors=True)
+
+        if last_error is not None:
+            raise DownloadPipelineError(
+                JobStep.DOWNLOADING,
+                f"Could not download any compatible audio format. Last error: {last_error}",
+            ) from last_error
+        raise DownloadPipelineError(JobStep.DOWNLOADING, "No compatible audio formats were available.")
+
+    def _download_video_with_fallback(
+        self,
+        *,
+        item: QueueItem,
+        plan: DownloadPlan,
+        temp_dir: Path,
+        on_update: Callable[[QueueItem], None] | None,
+    ) -> DownloadedMedia:
+        video_options = item.probe.video_formats if item.probe else []
+        audio_options = item.probe.audio_formats if item.probe else []
+        video_ids = self._ordered_format_ids(preferred=plan.video_format_id, options=video_options)
+        audio_ids = self._ordered_format_ids(preferred=plan.audio_format_id, options=audio_options)
+        last_error: DownloadPipelineError | None = None
+        attempt_index = 0
+
+        for video_id in video_ids:
+            video_option = self._find_option(video_options, video_id)
+            candidate_audio_ids = [""]
+            if video_option is not None and video_option.note == "video-only":
+                candidate_audio_ids = audio_ids
+            for audio_id in candidate_audio_ids:
+                attempt_index += 1
+                attempt_dir = temp_dir / f"video-attempt-{attempt_index}"
+                attempt_dir.mkdir(parents=True, exist_ok=True)
+                if attempt_index > 1:
+                    selected = "+".join(part for part in (video_id, audio_id) if part)
+                    self._set_state(
+                        item,
+                        status=JobStatus.RUNNING,
+                        step=JobStep.DOWNLOADING,
+                        detail=f"Retrying with compatible video format {selected}.",
+                        on_update=on_update,
+                    )
+                try:
+                    video_path = self._download_format(
+                        source_url=item.source_url,
+                        format_id=video_id,
+                        temp_dir=attempt_dir,
+                    )
+                    audio_path = None
+                    if audio_id:
+                        audio_path = self._download_format(
+                            source_url=item.source_url,
+                            format_id=audio_id,
+                            temp_dir=attempt_dir,
+                        )
+                    return DownloadedMedia(video_path=video_path, audio_path=audio_path)
+                except DownloadPipelineError as error:
+                    last_error = error
+                    shutil.rmtree(attempt_dir, ignore_errors=True)
+
+        if last_error is not None:
+            raise DownloadPipelineError(
+                JobStep.DOWNLOADING,
+                f"Could not download any compatible video format. Last error: {last_error}",
+            ) from last_error
+        raise DownloadPipelineError(JobStep.DOWNLOADING, "No compatible video formats were available.")
+
+    @staticmethod
+    def _ordered_format_ids(*, preferred: str, options: list[FormatOption]) -> list[str]:
+        ordered: list[str] = []
+        for format_id in [preferred, *(option.format_id for option in options)]:
+            normalized = str(format_id).strip()
+            if normalized and normalized not in ordered:
+                ordered.append(normalized)
+        return ordered
 
     def _finalize_download(
         self,
@@ -332,16 +443,19 @@ class QueueItemDownloader:
             if update.get("status") == "finished" and filename:
                 downloaded_paths.append(Path(str(filename)))
 
-        ydl_options = {
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "logger": _SilentYtdlpLogger(),
-            "format": format_id,
-            "paths": {"home": str(temp_dir)},
-            "outtmpl": {"default": "%(id)s.%(format_id)s.%(ext)s"},
-            "progress_hooks": [progress_hook],
-        }
+        ydl_options = build_ytdlp_options(
+            {
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "logger": _SilentYtdlpLogger(),
+                "format": format_id,
+                "paths": {"home": str(temp_dir)},
+                "outtmpl": {"default": "%(id)s.%(format_id)s.%(ext)s"},
+                "progress_hooks": [progress_hook],
+            },
+            js_runtime_path=self.js_runtime_path,
+        )
 
         try:
             with YoutubeDL(ydl_options) as ydl:

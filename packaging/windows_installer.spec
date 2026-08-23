@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 APP_NAME = "Back in my days Youtube"
@@ -10,6 +11,7 @@ ENTRY_SCRIPT = PROJECT_ROOT / "main.py"
 ICON_PATH = PROJECT_ROOT / "app" / "assets" / "icons" / "back-in-my-days-youtube.ico"
 MEDIA_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT"
 WEBVIEW2_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_INSTALLER_WEBVIEW2_STAGING_ROOT"
+NODE_STAGING_ROOT_ENV = "BACK_IN_MY_DAYS_YOUTUBE_NODE_RUNTIME_STAGING_ROOT"
 
 
 def _tool_candidates(name: str) -> tuple[Path, ...]:
@@ -79,15 +81,35 @@ def _require_staged_webview2_runtime() -> Path:
     return staged_runtime_dir
 
 
+def _require_staged_node_runtime() -> Path:
+    staging_root_value = os.environ.get(NODE_STAGING_ROOT_ENV, "").strip()
+    if not staging_root_value:
+        raise SystemExit(
+            "Windows installer build requires a staged Node.js runtime. "
+            f"Set {NODE_STAGING_ROOT_ENV} via scripts/build_windows_installer.ps1."
+        )
+
+    node_path = Path(staging_root_value).expanduser().resolve() / "node-runtime" / "node.exe"
+    if not node_path.is_file():
+        raise SystemExit(
+            f"Staged Node.js runtime is missing: {node_path}. "
+            "Run scripts/build_windows_installer.ps1 to prepare the bundle."
+        )
+    return node_path.parent
+
+
 STAGED_MEDIA_TOOLS_DIR = _require_staged_media_tools()
 STAGED_WEBVIEW2_RUNTIME_DIR = _require_staged_webview2_runtime()
+STAGED_NODE_RUNTIME_DIR = _require_staged_node_runtime()
 
 datas = [
     (str(PROJECT_ROOT / "frontend" / "dist"), "frontend/dist"),
     (str(PROJECT_ROOT / "app" / "assets"), "app/assets"),
     (str(STAGED_MEDIA_TOOLS_DIR), "app/bin"),
     (str(STAGED_WEBVIEW2_RUNTIME_DIR), "webview2-fixed-runtime"),
+    (str(STAGED_NODE_RUNTIME_DIR), "node-runtime"),
 ]
+datas += collect_data_files("yt_dlp_ejs")
 
 for optional_dir in ("tools", "vendor"):
     source_dir = PROJECT_ROOT / optional_dir
@@ -97,7 +119,10 @@ for optional_dir in ("tools", "vendor"):
 hiddenimports = [
     "webview.platforms.edgechromium",
     "webview.platforms.winforms",
+    "yt_dlp_ejs",
+    "yt_dlp_ejs.yt.solver",
 ]
+hiddenimports += collect_submodules("yt_dlp_ejs")
 
 
 a = Analysis(

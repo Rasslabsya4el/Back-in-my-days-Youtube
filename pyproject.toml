@@ -7,8 +7,9 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.13"
-yt-dlp = "2026.3.17"
+yt-dlp = "^2026.8.19"
 pywebview = "^6.2.1"
+yt-dlp-ejs = "0.8.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

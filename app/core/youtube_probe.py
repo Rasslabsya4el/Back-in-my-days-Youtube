@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from ..models import FormatOption, ProbeErrorCode, ProbeResult
+from .ytdlp_options import build_ytdlp_options
 
 YOUTUBE_HOSTS = {
     "youtube.com",
@@ -41,14 +43,17 @@ class _SilentYtdlpLogger:
 
 
 class YoutubeProbeService:
-    def __init__(self) -> None:
-        self._ydl_options = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "noplaylist": True,
-            "logger": _SilentYtdlpLogger(),
-        }
+    def __init__(self, *, js_runtime_path: Path | None = None) -> None:
+        self._ydl_options = build_ytdlp_options(
+            {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "logger": _SilentYtdlpLogger(),
+            },
+            js_runtime_path=js_runtime_path,
+        )
 
     def probe(self, url: str) -> ProbeResult:
         normalized_url = self.normalize_url(url)

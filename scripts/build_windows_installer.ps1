@@ -11,11 +11,14 @@ $mediaToolsPrepScript = Join-Path $repoRoot "scripts\\prepare_windows_portable_m
 $webView2PrepScript = Join-Path $repoRoot "scripts\\prepare_windows_portable_webview2_runtime.py"
 $mediaToolsStagingRoot = Join-Path $repoRoot "build\\portable-media-tools"
 $webView2StagingRoot = Join-Path $repoRoot "build\\installer-webview2-runtime"
+$nodeStagingRoot = Join-Path $repoRoot "build\\installer-node-runtime"
+$nodePath = Join-Path $nodeStagingRoot "node-runtime\\node.exe"
 $payloadRoot = Join-Path $repoRoot "dist\\Back in my days Youtube Installer Payload"
 $setupExe = Join-Path $repoRoot "dist\\Back in my days Youtube Setup.exe"
 $isccPath = "C:\\Users\\user\\AppData\\Local\\Programs\\Inno Setup 6\\ISCC.exe"
 $previousPortableMediaStagingRoot = $env:BACK_IN_MY_DAYS_YOUTUBE_PORTABLE_MEDIA_STAGING_ROOT
 $previousInstallerWebView2StagingRoot = $env:BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_INSTALLER_WEBVIEW2_STAGING_ROOT
+$previousNodeStagingRoot = $env:BACK_IN_MY_DAYS_YOUTUBE_NODE_RUNTIME_STAGING_ROOT
 
 Push-Location $repoRoot
 try {
@@ -39,6 +42,24 @@ try {
         throw "Installer WebView2 runtime staging failed."
     }
     $env:BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_INSTALLER_WEBVIEW2_STAGING_ROOT = $webView2StagingRoot
+
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $nodeCommand) {
+        throw "Node.js 22+ is required on the build machine to provide yt-dlp YouTube JavaScript support."
+    }
+    $nodeVersionText = (& $nodeCommand.Source --version 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $nodeVersionText -notmatch '^v(?<major>\d+)\.') {
+        throw "Could not determine the Node.js version from $($nodeCommand.Source). Node.js 22+ is required."
+    }
+    if ([int]$Matches.major -lt 22) {
+        throw "Node.js 22+ is required on the build machine; detected $nodeVersionText."
+    }
+    if (Test-Path $nodeStagingRoot) {
+        Remove-Item -LiteralPath $nodeStagingRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path (Split-Path $nodePath -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $nodeCommand.Source -Destination $nodePath
+    $env:BACK_IN_MY_DAYS_YOUTUBE_NODE_RUNTIME_STAGING_ROOT = $nodeStagingRoot
 
     npm run build
     if ($LASTEXITCODE -ne 0) {
@@ -79,6 +100,12 @@ finally {
     }
     else {
         Remove-Item Env:BACK_IN_MY_DAYS_YOUTUBE_WINDOWS_INSTALLER_WEBVIEW2_STAGING_ROOT -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $previousNodeStagingRoot) {
+        $env:BACK_IN_MY_DAYS_YOUTUBE_NODE_RUNTIME_STAGING_ROOT = $previousNodeStagingRoot
+    }
+    else {
+        Remove-Item Env:BACK_IN_MY_DAYS_YOUTUBE_NODE_RUNTIME_STAGING_ROOT -ErrorAction SilentlyContinue
     }
     Pop-Location
 }

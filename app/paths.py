@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -127,3 +128,15 @@ def resolve_webview2_runtime_dir() -> tuple[str, Path | None]:
 
 def webview2_runtime_dir() -> Path | None:
     return resolve_webview2_runtime_dir()[1]
+
+
+def resolve_node_runtime_path() -> Path | None:
+    """Return the bundled Node runtime, or a Node executable on PATH."""
+
+    bundled_path = resource_project_root() / "node-runtime" / "node.exe"
+    if bundled_path.is_file():
+        return bundled_path
+
+    node_name = "node.exe" if os.name == "nt" else "node"
+    system_path = shutil.which(node_name)
+    return Path(system_path).resolve() if system_path else None
